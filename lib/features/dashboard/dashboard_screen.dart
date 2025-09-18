@@ -1,11 +1,13 @@
+// lib/features/dashboard/dashboard_screen.dart
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:untitled/features/auth/login_screen.dart';
+import 'package:untitled/widgets/twc_toast.dart';
 
 import '../../theme/colors.dart';
 import '../../service/providers/api_and_auth.dart';
@@ -17,12 +19,16 @@ class DashboardScreen extends ConsumerStatefulWidget {
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
+// lib/features/dashboard/dashboard_screen.dart
+
 class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerProviderStateMixin {
   bool _checkedIn = false;
   DateTime? _lastToggledAt;
 
-  // animation controllers (created in initState)
-  late final AnimationController _pressController;
+  // New state for handling the 3D press animation
+  bool _isPressed = false;
+
+  // animation controllers
   late final AnimationController _pulseController;
 
   // loading state for API call
@@ -33,14 +39,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
   @override
   void initState() {
     super.initState();
-
-    _pressController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 120),
-      lowerBound: 0.94,
-      upperBound: 1.0,
-      value: 1.0,
-    );
 
     _pulseController = AnimationController(
       vsync: this,
@@ -53,20 +51,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
       if (status == AnimationStatus.completed) _pulseController.reverse();
     });
 
-    // restore persisted attendance state (non-blocking)
     _restoreAttendanceFromPrefs();
   }
 
   @override
   void dispose() {
-    _pressController.dispose();
     _pulseController.dispose();
     _removeToast();
     super.dispose();
   }
 
+  // --- All your existing methods for SharedPreferences, Toast, API calls, and Logout Dialog remain the same ---
+  // ... ( _restoreAttendanceFromPrefs, _saveAttendanceToPrefs, _clearAttendanceFromPrefs )
+  // ... ( _removeToast, _performAttendance, _confirmAndLogout, _buildAvatar )
+
+  // PASTE ALL YOUR OTHER METHODS HERE, from _restoreAttendanceFromPrefs down to _buildAvatar.
+  // The provided code below only contains the NEW button widget and the updated `build` method.
+  // For your convenience, I am including them all again here.
+
   // -------------------------
-  // SharedPreferences persistence (Option A)
+  // SharedPreferences persistence
   // -------------------------
   static const _kCheckedInKey = 'checked_in';
   static const _kLastToggledAtKey = 'last_toggled_at';
@@ -95,7 +99,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
         }
       }
     } catch (e) {
-      // ignore restore errors (don't block UI)
+      // ignore restore errors
     }
   }
 
@@ -109,7 +113,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
         await sp.remove(_kLastToggledAtKey);
       }
     } catch (e) {
-      // ignoring save errors (optional: show a toast)
+      // ignoring save errors
     }
   }
 
@@ -133,127 +137,72 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
     _toastEntry = null;
   }
 
-  void _showToast(String message, {bool isError = false, Duration duration = const Duration(seconds: 3)}) {
-    // remove existing
-    _removeToast();
-
-    final overlay = Overlay.of(context);
-
-    final themeBg = isError ? Colors.red.shade600 : Colors.green.shade600;
-    final textColor = Colors.white;
-
-    _toastEntry = OverlayEntry(
-      builder: (context) {
-        return Positioned(
-          bottom: 36,
-          left: 24,
-          right: 24,
-          child: Material(
-            color: Colors.transparent,
-            child: AnimatedOpacity(
-              opacity: 1,
-              duration: const Duration(milliseconds: 250),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: themeBg,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 12, offset: const Offset(0, 6))],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(isError ? Icons.error_outline : Icons.check_circle_outline, color: textColor),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        message,
-                        style: GoogleFonts.lato(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
-    overlay.insert(_toastEntry!);
-
-    // auto remove
-    Timer(duration, () {
-      _removeToast();
-    });
-  }
-
   // -------------------------
   // API call & loading state
   // -------------------------
   Future<void> _performAttendance() async {
     final mobile = ref.read(authNotifierProvider).mobile;
     if (mobile == null || mobile.isEmpty) {
-      _showToast('Mobile not found. Please login again.', isError: true);
+      showTwcToast(context, 'Mobile not found. Please login again.', isError: true);
       return;
     }
-
-    if (_isLoading) return; // prevent double-tap
-
+    if (_isLoading) return;
     setState(() => _isLoading = true);
-
     try {
       final api = ref.read(apiServiceProvider);
       final resp = await api.driverAttendance(mobile);
-
+      if (!mounted) return;
       final data = resp.data;
       if (data is Map<String, dynamic>) {
         final status = data['status']?.toString().toLowerCase();
         final serverMessage = data['message']?.toString();
-
         if (status == 'success') {
           setState(() {
             _checkedIn = !_checkedIn;
             _lastToggledAt = DateTime.now();
           });
-
-          // persist locally
           await _saveAttendanceToPrefs();
-
-          // pulse animation
+          if (!mounted) return;
           _pulseController.forward(from: 0.0);
-
-          _showToast(serverMessage ?? (_checkedIn ? 'Checked in' : 'Checked out'), isError: false);
+          showTwcToast(context, serverMessage ?? (_checkedIn ? 'Checked in' : 'Checked out'), isError: false);
         } else {
           final message = serverMessage ?? 'Server returned an error during attendance.';
-          _showToast(message, isError: true);
+          showTwcToast(context, message, isError: true);
         }
       } else {
-        _showToast('Unexpected server response', isError: true);
+        showTwcToast(context, 'Unexpected server response', isError: true);
       }
     } on DioException catch (e) {
-      String message = 'Network error';
-      if (e.response != null) {
+      String message = 'Network error. Please check your connection.';
+      if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout || e.type == DioExceptionType.sendTimeout) {
+        message = 'Request timed out. Please try again.';
+      } else if (e.type == DioExceptionType.unknown) {
+        message = 'Cannot reach the server. Please check your internet or VPN.';
+      } else if (e.response != null) {
         final d = e.response!.data;
-        if (d is Map && d['message'] != null) message = d['message'].toString();
-      } else if (e.message != null) {
-        message = e.message!;
+        if (d is Map && d['message'] != null) {
+          message = d['message'].toString();
+        }
       }
-      _showToast('Error: $message', isError: true);
+      if (!mounted) return;
+      showTwcToast(context, message, isError: true);
     } catch (e) {
-      _showToast('Error: ${e.toString()}', isError: true);
+      if (!mounted) return;
+      showTwcToast(context, 'Error: ${e.toString()}', isError: true);
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  /// Show confirmation dialog and logout if user confirms.
+  // -------------------------
+  // Logout Dialog
+  // -------------------------
   Future<void> _confirmAndLogout() async {
-    final navigator = Navigator.of(context);
-
+    // ... This method remains exactly the same as in your original code
     final shouldLogout = await showDialog<bool>(
       context: context,
-      barrierDismissible: true,
       builder: (ctx) {
         return Dialog(
           backgroundColor: Colors.transparent,
@@ -262,70 +211,47 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 18, offset: const Offset(0, 8)),
-              ],
+              boxShadow: [ BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 18, offset: const Offset(0, 8)), ],
             ),
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Icon + title row
                 Row(
                   children: [
                     Container(
                       width: 46,
                       height: 46,
-                      decoration: BoxDecoration(
-                        color: const Color.fromRGBO(45, 60, 75, 0.06),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      decoration: BoxDecoration( color: const Color.fromRGBO(45, 60, 75, 0.06), borderRadius: BorderRadius.circular(12), ),
                       child: Icon(Icons.logout, color: TWCColors.coffeeDark, size: 26),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        'Confirm logout',
-                        style: GoogleFonts.lato(fontSize: 20, fontWeight: FontWeight.w700, color: TWCColors.coffeeDark),
-                      ),
+                      child: Text('Confirm logout', style: const TextStyle( fontFamily: 'Lato', fontSize: 20, fontWeight: FontWeight.w700, color: TWCColors.coffeeDark, ), ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Are you sure you want to logout?',
-                    style: GoogleFonts.merriweather(fontSize: 15, color: Colors.black87),
-                  ),
+                  child: Text( 'Are you sure you want to logout?', style: const TextStyle( fontFamily: 'Merriweather', fontSize: 15, color: Colors.black87, ), ),
                 ),
                 const SizedBox(height: 18),
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: TWCColors.coffeeDark.withValues(alpha: 0.14)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          foregroundColor: TWCColors.coffeeDark,
-                          backgroundColor: Colors.white,
-                        ),
+                        style: OutlinedButton.styleFrom( side: BorderSide(color: TWCColors.coffeeDark.withOpacity(0.14)), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 12), foregroundColor: TWCColors.coffeeDark, backgroundColor: Colors.white, ),
                         onPressed: () => Navigator.of(ctx).pop(false),
-                        child: Text('Cancel', style: GoogleFonts.lato(fontWeight: FontWeight.w600)),
+                        child: const Text('Cancel', style: TextStyle(fontFamily: 'Lato', fontWeight: FontWeight.w600)),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: TWCColors.accentBurgundy,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          elevation: 2,
-                        ),
+                        style: ElevatedButton.styleFrom( backgroundColor: TWCColors.accentBurgundy, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), padding: const EdgeInsets.symmetric(vertical: 12), elevation: 2, ),
                         onPressed: () => Navigator.of(ctx).pop(true),
-                        child: Text('Logout', style: GoogleFonts.lato(fontWeight: FontWeight.w700, color: Colors.white)),
+                        child: const Text('Logout', style: TextStyle(fontFamily: 'Lato', fontWeight: FontWeight.w700, color: Colors.white)),
                       ),
                     ),
                   ],
@@ -339,145 +265,147 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
 
     if (shouldLogout == true) {
       await ref.read(authNotifierProvider.notifier).logout();
-
-      // clear persisted attendance
       await _clearAttendanceFromPrefs();
-
       if (!mounted) return;
-      navigator.popUntil((route) => route.isFirst);
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (route) => false,
+      );
     }
   }
 
+  // -------------------------
+  // Avatar Widget
+  // -------------------------
   Widget _buildAvatar(String mobile) {
     return Row(
       children: [
         CircleAvatar(
           radius: 24,
-          backgroundColor: TWCColors.coffeeDark.withValues(alpha: 0.08),
+          backgroundColor: TWCColors.coffeeDark.withOpacity(0.08),
           child: const Icon(Icons.admin_panel_settings, color: TWCColors.coffeeDark),
         ),
         const SizedBox(width: 12),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Welcome,', style: GoogleFonts.merriweather(fontSize: 14, color: TWCColors.coffeeDark.withValues(alpha: 0.8))),
+            const Text('Welcome,', style: TextStyle(fontFamily: 'Merriweather', fontSize: 14, color: Color(0xFF2D3C4B))),
             const SizedBox(height: 2),
-            Text(mobile, style: GoogleFonts.merriweather(fontSize: 18, color: TWCColors.coffeeDark, fontWeight: FontWeight.w700)),
+            Text(mobile, style: const TextStyle(fontFamily: 'Merriweather', fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF2D3C4B))),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildActionButton(double size) {
-    final primary = _checkedIn ? Colors.deepOrange.shade600 : Colors.green.shade600;
-    final icon = _checkedIn ? Icons.check_circle_outline : Icons.login;
-    final label = _checkedIn ? 'Check-Out' : 'Check-In';
-
-    final pulse = Tween<double>(begin: 0.0, end: 18.0).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeOut));
-
-    // When loading: show a disabled circular button with a small spinner + label
-    if (_isLoading) {
-      return Transform.scale(
-        scale: _pressController.value,
-        child: Material(
-          color: primary.withValues(alpha: 0.9),
-          shape: const CircleBorder(),
-          elevation: 6,
-          child: Container(
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: size * 0.14,
-                  height: size * 0.14,
-                  child: const CircularProgressIndicator(strokeWidth: 2.6, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Please wait',
-                  style: GoogleFonts.lato(
-                    fontSize: size * 0.09,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white70,
-                  ),
-                ),
-              ],
-            ),
-          ),
+  // --- NEW 3D BUTTON WIDGET ---
+  Widget _buildThreeDeeButton() {
+    // Styling for the "Outset" button (when checked out)
+    final outsetDecoration = BoxDecoration(
+      color: TWCColors.coffeeDark,
+      borderRadius: BorderRadius.circular(30),
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          TWCColors.coffeeDark.withRed(80), // Lighter shade for top-left highlight
+          TWCColors.coffeeDark,
+        ],
+      ),
+      boxShadow: _isPressed ? [] : [
+        // Bottom-right dark shadow for raised effect
+        BoxShadow(
+          color: Colors.black.withOpacity(0.3),
+          offset: const Offset(6, 6),
+          blurRadius: 12,
         ),
-      );
+        // Top-left light shadow for raised effect
+        BoxShadow(
+          color: TWCColors.coffeeDark.withOpacity(0.8).withRed(90),
+          offset: const Offset(-6, -6),
+          blurRadius: 12,
+        ),
+      ],
+    );
+
+    // Styling for the "Inset" button (when checked in)
+    final insetDecoration = BoxDecoration(
+      color: TWCColors.latteBg,
+      borderRadius: BorderRadius.circular(30),
+      boxShadow: [
+        // Top-left dark shadow for pressed-in effect
+        BoxShadow(
+          color: Colors.black.withOpacity(0.2),
+          offset: const Offset(-4, -4),
+          blurRadius: 8,
+        ),
+        // Bottom-right light shadow for pressed-in effect
+        BoxShadow(
+          color: Colors.white.withOpacity(0.9),
+          offset: const Offset(4, 4),
+          blurRadius: 8,
+        ),
+      ],
+    );
+
+    // Determine current state
+    bool isCheckedIn = _checkedIn;
+    final decoration = isCheckedIn ? insetDecoration : outsetDecoration;
+    final icon = isCheckedIn ? Icons.stop_rounded : Icons.play_arrow_rounded;
+    final label = isCheckedIn ? 'End Shift' : 'Start Shift';
+    final textColor = isCheckedIn ? TWCColors.coffeeDark : Colors.white;
+
+    // --- Loading State ---
+    if (_isLoading) {
+      return Container(
+          height: 80,
+          alignment: Alignment.center,
+          decoration: insetDecoration,
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: TWCColors.coffeeDark),
+              ),
+              SizedBox(width: 16),
+              Text('Please wait...', style: TextStyle(fontFamily: 'Lato', fontSize: 18, color: TWCColors.coffeeDark)),
+            ],
+          ));
     }
 
-    // Normal interactive button
-    return AnimatedBuilder(
-      animation: Listenable.merge([_pressController, _pulseController]),
-      builder: (context, _) {
-        final scale = _pressController.value;
-        final glowSpread = pulse.value;
-        return Transform.scale(
-          scale: scale,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // animated glow
-              Container(
-                width: size + glowSpread,
-                height: size + glowSpread,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: primary.withValues(alpha: 0.22),
-                      blurRadius: 24 + glowSpread / 2,
-                      spreadRadius: glowSpread / 6,
-                    ),
-                  ],
-                ),
-              ),
-
-              // main circular button with ripple
-              Material(
-                color: primary,
-                shape: const CircleBorder(),
-                elevation: 6,
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: _performAttendance,
-                  onTapDown: (_) => _pressController.reverse(),
-                  onTapCancel: () => _pressController.forward(),
-                  onTapUp: (_) => _pressController.forward(),
-                  splashColor: Colors.white24,
-                  child: Container(
-                    width: size,
-                    height: size,
-                    padding: EdgeInsets.symmetric(vertical: size * 0.12),
-                    alignment: Alignment.center,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(icon, size: size * 0.24, color: Colors.white),
-                        const SizedBox(height: 8),
-                        Text(
-                          label,
-                          style: GoogleFonts.lato(
-                            fontSize: size * 0.11,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
+    // --- Interactive Button ---
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) {
+        setState(() => _isPressed = false);
+        _performAttendance(); // Trigger API call
       },
+      onTapCancel: () => setState(() => _isPressed = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 80,
+        // Apply a slight downward shift when pressed
+        transform: _isPressed ? Matrix4.translationValues(2, 2, 0) : Matrix4.identity(),
+        decoration: decoration,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: textColor, size: 30),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'Lato',
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -485,9 +413,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
   Widget build(BuildContext context) {
     final auth = ref.watch(authNotifierProvider);
     final mobile = auth.mobile ?? 'Unknown';
-
-    final width = MediaQuery.of(context).size.width;
-    final buttonSize = (width * 0.45).clamp(140.0, 260.0);
 
     return Scaffold(
       backgroundColor: TWCColors.latteBg,
@@ -497,7 +422,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
         leading: null,
         automaticallyImplyLeading: false,
         centerTitle: true,
-        title: Text('Dashboard', style: GoogleFonts.lato(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
+        title: const Text('Dashboard', style: TextStyle(fontFamily: 'Lato', fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
@@ -512,25 +437,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
           child: Column(
             children: [
               const SizedBox(height: 18),
-
-              // Welcome row with avatar + phone
               Align(
                 alignment: Alignment.centerLeft,
                 child: _buildAvatar(mobile),
               ),
-
-              // center content
               Expanded(
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // action button
-                      _buildActionButton(buttonSize),
+                      // Our new 3D button
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                        child: _buildThreeDeeButton(),
+                      ),
 
-                      const SizedBox(height: 22),
+                      const SizedBox(height: 32),
 
-                      // status + last toggled (animated)
+                      // Status + last toggled (animated)
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
@@ -538,14 +462,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
                           key: ValueKey<bool>(_checkedIn),
                           children: [
                             Text(
-                              _checkedIn ? 'You are checked in' : 'You are checked out',
-                              style: GoogleFonts.merriweather(fontSize: 18, color: TWCColors.coffeeDark, fontWeight: FontWeight.w600),
+                              _checkedIn ? 'Shift is Active' : 'You Are Off Duty',
+                              style: const TextStyle(fontFamily: 'Merriweather', fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF2D3C4B)),
                             ),
                             if (_lastToggledAt != null) ...[
                               const SizedBox(height: 6),
                               Text(
                                 'Last: ${DateFormat('hh:mm:ss a, dd MMM yyyy').format(_lastToggledAt!)}',
-                                style: GoogleFonts.merriweather(fontSize: 13, color: Colors.black54),
+                                style: const TextStyle(fontFamily: 'Merriweather', fontSize: 13, color: Colors.black54),
                               ),
                             ],
                           ],
@@ -555,13 +479,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
                   ),
                 ),
               ),
-
-              // footer hint (closer to action)
               Padding(
                 padding: const EdgeInsets.only(bottom: 18),
-                child: Text(
-                  'Tap the button to toggle Check-In / Check-Out',
-                  style: GoogleFonts.merriweather(fontSize: 13, color: Colors.black54),
+                child: const Text(
+                  'Press the button to start or end your shift',
+                  style: TextStyle(fontFamily: 'Merriweather', fontSize: 13, color: Colors.black54),
                 ),
               ),
             ],

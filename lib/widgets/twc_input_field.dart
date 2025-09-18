@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../theme/colors.dart';
 
 class TWCInputField extends StatelessWidget {
@@ -26,7 +25,12 @@ class TWCInputField extends StatelessWidget {
         controller: controller,
         keyboardType: TextInputType.phone,
         maxLength: maxLength,
-        style: GoogleFonts.merriweather(fontSize: 15, letterSpacing: 1.0, color: TWCColors.coffeeDark),
+        style: const TextStyle(
+          fontFamily: 'Merriweather',
+          fontSize: 15,
+          letterSpacing: 1.0,
+          color: TWCColors.coffeeDark,
+        ),
         decoration: InputDecoration(
           counterText: '',
           prefixIcon: showPrefix
@@ -35,7 +39,15 @@ class TWCInputField extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('+91', style: GoogleFonts.lato(fontWeight: FontWeight.w600, color: TWCColors.coffeeDark)),
+                const Text(
+                  '+91',
+                  style: TextStyle(
+                    fontFamily: 'Lato',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    color: TWCColors.coffeeDark,
+                  ),
+                ),
                 const SizedBox(width: 6),
                 Container(width: 1, height: 26, color: Colors.grey.shade300),
               ],
@@ -45,9 +57,16 @@ class TWCInputField extends StatelessWidget {
           filled: true,
           fillColor: Colors.white,
           hintText: hint,
-          hintStyle: GoogleFonts.merriweather(color: Colors.grey),
+          hintStyle: const TextStyle(
+            fontFamily: 'Merriweather',
+            fontSize: 15,
+            color: Colors.grey,
+          ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
         ),
         onChanged: onChanged,
       ),

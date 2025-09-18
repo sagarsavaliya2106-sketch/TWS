@@ -1,9 +1,10 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:untitled/features/dashboard/dashboard_screen.dart';
+import 'package:untitled/widgets/twc_toast.dart';
 
 import '../../theme/colors.dart';
 import '../../theme/text_styles.dart';
@@ -62,53 +63,89 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   }
 
   Future<void> _onVerify() async {
-    setState(() {
-      _errorText = null;
-    });
+    // clear previous error
+    if (mounted) setState(() => _errorText = null);
 
     final otp = _currentOtp;
     if (otp.length != 4 || otp.contains(RegExp(r'\D'))) {
-      setState(() {
-        _errorText = 'Please enter the 4-digit OTP';
-      });
+      if (mounted) setState(() => _errorText = 'Please enter the 4-digit OTP');
       return;
     }
 
-    // local OTP check (demo)
+    // local demo OTP
     if (otp != '1234') {
-      setState(() {
-        _errorText = 'Invalid OTP. Use 1234 for demo.';
-      });
+      if (mounted) setState(() => _errorText = 'Invalid OTP. Use 1234 for demo.');
       return;
     }
 
-    // OTP ok locally — now call the server to verify mobile registration
-    setState(() => _loading = true);
+    // begin server verification flow
+    if (mounted) setState(() => _loading = true);
 
-    // Ensure mobile saved in auth state
-    await ref.read(authNotifierProvider.notifier).setMobileOnly(widget.mobile);
+    try {
+      // Save mobile locally
+      await ref.read(authNotifierProvider.notifier).setMobileOnly(widget.mobile);
 
-    final result = await ref.read(authNotifierProvider.notifier).verifyMobileOnServer();
+      // call server to verify mobile
+      final result = await ref.read(authNotifierProvider.notifier).verifyMobileOnServer();
 
-    if (!mounted) return;
-    setState(() => _loading = false);
+      // guard after awaiting network call
+      if (!mounted) return;
 
-    if (result['ok'] == true) {
-      await ref.read(authNotifierProvider.notifier).completeLogin();
+      if (result['ok'] == true) {
+        // success -> complete login
+        await ref.read(authNotifierProvider.notifier).completeLogin();
 
-      if (mounted) {
+        if (!mounted) return;
+
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const DashboardScreen()),
               (route) => false,
         );
+      } else {
+        // server returned ok == false with a message
+        final msg = result['message']?.toString() ?? 'Server verification failed';
+
+        // classify network-like messages so we show the network dialog instead of raw text
+        final lower = msg.toLowerCase();
+        final isNetworkLike = lower.contains('failed host lookup') ||
+            lower.contains('socketexception') ||
+            lower.contains('network error') ||
+            lower.contains('timed out') ||
+            lower.contains('cannot reach') ||
+            lower.contains('dns') ||
+            lower.contains('host lookup');
+
+        if (isNetworkLike) {
+          showTwcToast(context, 'Network error — please check connection', isError: true);
+        } else {
+          // real validation/server error -> show inline under OTP boxes
+          if (mounted) setState(() => _errorText = msg);
+        }
+      }
+    } on DioException catch (e) {
+      // defensive handler in case verifyMobileOnServer throws directly
+      String message = 'Network error. Please check your connection.';
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.sendTimeout) {
+        message = 'Request timed out. Please try again.';
+      } else if (e.type == DioExceptionType.unknown) {
+        message = 'Cannot reach the server. Please check your internet or VPN.';
+      } else if (e.response != null) {
+        final d = e.response!.data;
+        if (d is Map && d['message'] != null) message = d['message'].toString();
       }
 
-    } else {
-      final msg = result['message']?.toString() ?? 'Server verification failed';
-      setState(() => _errorText = msg);
+      if (!mounted) return;
 
-      // ❌ REMOVE auto pop back to login
-      // User stays on OTP screen until they choose to go back.
+      showTwcToast(context, message, isError: true);
+    } catch (e) {
+      if (!mounted) return;
+      final msg = 'Error: ${e.toString()}';
+      if (mounted) setState(() => _errorText = msg);
+      showTwcToast(context, msg, isError: true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -119,15 +156,12 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
       child: KeyboardListener(
         focusNode: FocusNode(skipTraversal: true),
         onKeyEvent: (KeyEvent event) {
-          // We only care about key-down events for backspace handling
           if (event is KeyDownEvent) {
-            // LogicalKeyboardKey.backspace is the backspace key
             if (event.logicalKey == LogicalKeyboardKey.backspace) {
-              // If current is empty, move focus back and clear previous
               if (_controllers[index].text.isEmpty && index > 0) {
                 _focusNodes[index - 1].requestFocus();
                 _controllers[index - 1].clear();
-                setState(() {}); // update UI
+                setState(() {});
               }
             }
           }
@@ -138,7 +172,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
           textAlign: TextAlign.center,
           keyboardType: TextInputType.number,
           maxLength: 1,
-          style: GoogleFonts.lato(
+          style: const TextStyle(
+            fontFamily: 'Lato',   // ✅ use your local font
             fontSize: 22,
             fontWeight: FontWeight.w600,
             color: TWCColors.coffeeDark,
@@ -148,7 +183,10 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
             filled: true,
             fillColor: Colors.white,
             contentPadding: const EdgeInsets.symmetric(vertical: 6),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
           ),
           onChanged: (v) => _onDigitChanged(v, index),
         ),
