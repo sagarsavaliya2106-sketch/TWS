@@ -119,6 +119,31 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
     }
   }
 
+  Future<void> _syncOfflineRecords() async {
+    try {
+      final pending = await LocalDbService.getAllRecords();
+      if (pending.isEmpty) {
+        debugPrint("🟢 No offline records to sync");
+        return;
+      }
+
+      debugPrint("📤 Found ${pending.length} offline records — syncing...");
+
+      final api = ref.read(apiServiceProvider);
+      await api.sendLocationBatch(pending);
+
+      debugPrint("✅ Synced ${pending.length} offline records");
+
+      // ✅ Clear all synced records
+      await LocalDbService.clearAll();
+
+      // ✅ Then cleanup old (>2 days) data
+      await LocalDbService.deleteOldRecords();
+    } catch (e) {
+      debugPrint("⚠️ Offline sync failed: $e");
+    }
+  }
+
   Future<void> _sendBatchToServer() async {
     if (_batchBuffer.isEmpty) return;
 
@@ -137,6 +162,9 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
 
       _batchBuffer.clear();
       _lastSentAt = DateTime.now();
+
+      // 🔁 Try syncing any offline data (if available)
+      await _syncOfflineRecords();
 
       // ✅ 2. Back to idle after success
       ref.read(syncStatusProvider.notifier).state = SyncStatus.idle;

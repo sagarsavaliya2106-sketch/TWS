@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -45,12 +46,24 @@ class LocalDbService {
   }
 
   /// Delete older than 2 days
-  static Future<void> deleteOldRecords() async {
-    final cutoff = DateTime.now().subtract(const Duration(days: 2));
-    await _db?.delete(
+  /// 🧹 Delete records older than 2 days (48 hours)
+  static Future<int> deleteOldRecords() async {
+    if (_db == null) {
+      await init(); // ensure database is open
+    }
+
+    final cutoff = DateTime.now()
+        .toUtc()
+        .subtract(const Duration(days: 2))
+        .toIso8601String();
+
+    final count = await _db!.delete(
       'location_records',
       where: 'timestamp < ?',
-      whereArgs: [cutoff.toIso8601String()],
+      whereArgs: [cutoff],
     );
+
+    debugPrint("🧹 Cleaned up $count old location records (older than 2 days)");
+    return count;
   }
 }
