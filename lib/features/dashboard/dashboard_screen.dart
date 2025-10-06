@@ -308,6 +308,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
     final auth = ref.watch(authNotifierProvider);
     final mobile = auth.mobile ?? 'Unknown';
     final pos = ref.watch(locationProvider);
+    final syncStatus = ref.watch(syncStatusProvider);
 
     return Scaffold(
       backgroundColor: TWCColors.latteBg,
@@ -367,6 +368,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
                                 'Location: ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
                                 style: const TextStyle(fontSize: 13, color: Colors.black54),
                               ),
+                              const SizedBox(height: 4),
+                              _buildSyncBadge(syncStatus),
                             ],
                           ],
                         ),
@@ -384,5 +387,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
         ),
       ),
     );
+  }
+
+  Widget _buildSyncBadge(SyncStatus status) {
+    switch (status) {
+      case SyncStatus.syncing:
+        return const Text(
+          '⏳ Syncing...',
+          style: TextStyle(color: Colors.orange, fontSize: 13),
+        );
+      case SyncStatus.offline:
+        return const Text(
+          '⚠️ Offline — saving locally',
+          style: TextStyle(color: Colors.redAccent, fontSize: 13),
+        );
+      case SyncStatus.idle:
+      return const Text(
+          '✅ All data synced',
+          style: TextStyle(color: Colors.green, fontSize: 13),
+        );
+    }
   }
 }

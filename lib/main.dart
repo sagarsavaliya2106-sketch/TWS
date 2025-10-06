@@ -1,14 +1,19 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:untitled/service/local_db_service.dart';
+import 'package:untitled/service/network_monitor.dart';
 
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'service/providers/auth_provider.dart';
 import 'theme/colors.dart';
 
-void main() {
-  runApp(const ProviderScope(child: MyApp()));
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await LocalDbService.init();
+  final container = ProviderContainer();
+  container.read(networkMonitorProvider); // start monitoring
+  runApp(UncontrolledProviderScope(container: container, child: const MyApp()));
 }
 
 class MyApp extends ConsumerWidget {

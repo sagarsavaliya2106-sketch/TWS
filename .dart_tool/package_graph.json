@@ -8,6 +8,7 @@
       "version": "1.0.0+1",
       "dependencies": [
         "battery_plus",
+        "connectivity_plus",
         "cupertino_icons",
         "dio",
         "flutter",
@@ -16,7 +17,9 @@
         "geolocator",
         "intl",
         "lottie",
-        "shared_preferences"
+        "path",
+        "shared_preferences",
+        "sqflite"
       ],
       "devDependencies": [
         "flutter_lints",
@@ -62,6 +65,36 @@
       "name": "cupertino_icons",
       "version": "1.0.8",
       "dependencies": []
+    },
+    {
+      "name": "connectivity_plus",
+      "version": "7.0.0",
+      "dependencies": [
+        "collection",
+        "connectivity_plus_platform_interface",
+        "flutter",
+        "flutter_web_plugins",
+        "meta",
+        "nm",
+        "web"
+      ]
+    },
+    {
+      "name": "path",
+      "version": "1.9.1",
+      "dependencies": []
+    },
+    {
+      "name": "sqflite",
+      "version": "2.4.2",
+      "dependencies": [
+        "flutter",
+        "path",
+        "sqflite_android",
+        "sqflite_common",
+        "sqflite_darwin",
+        "sqflite_platform_interface"
+      ]
     },
     {
       "name": "battery_plus",
@@ -297,11 +330,6 @@
       ]
     },
     {
-      "name": "path",
-      "version": "1.9.1",
-      "dependencies": []
-    },
-    {
       "name": "matcher",
       "version": "0.12.17",
       "dependencies": [
@@ -328,15 +356,24 @@
       ]
     },
     {
+      "name": "nm",
+      "version": "0.5.0",
+      "dependencies": [
+        "dbus"
+      ]
+    },
+    {
       "name": "web",
       "version": "1.1.1",
       "dependencies": []
     },
     {
-      "name": "upower",
-      "version": "0.7.0",
+      "name": "connectivity_plus_platform_interface",
+      "version": "2.0.1",
       "dependencies": [
-        "dbus"
+        "flutter",
+        "meta",
+        "plugin_platform_interface"
       ]
     },
     {
@@ -349,6 +386,54 @@
         "material_color_utilities",
         "meta",
         "vector_math"
+      ]
+    },
+    {
+      "name": "sqflite_common",
+      "version": "2.5.6",
+      "dependencies": [
+        "meta",
+        "path",
+        "synchronized"
+      ]
+    },
+    {
+      "name": "sqflite_platform_interface",
+      "version": "2.4.0",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "platform",
+        "plugin_platform_interface",
+        "sqflite_common"
+      ]
+    },
+    {
+      "name": "sqflite_darwin",
+      "version": "2.4.2",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "path",
+        "sqflite_common",
+        "sqflite_platform_interface"
+      ]
+    },
+    {
+      "name": "sqflite_android",
+      "version": "2.4.1",
+      "dependencies": [
+        "flutter",
+        "path",
+        "sqflite_common",
+        "sqflite_platform_interface"
+      ]
+    },
+    {
+      "name": "upower",
+      "version": "0.7.0",
+      "dependencies": [
+        "dbus"
       ]
     },
     {
@@ -560,6 +645,16 @@
       ]
     },
     {
+      "name": "synchronized",
+      "version": "3.4.0",
+      "dependencies": []
+    },
+    {
+      "name": "platform",
+      "version": "3.1.6",
+      "dependencies": []
+    },
+    {
       "name": "package_info_plus",
       "version": "8.3.1",
       "dependencies": [
@@ -713,11 +808,6 @@
     {
       "name": "sprintf",
       "version": "7.0.0",
-      "dependencies": []
-    },
-    {
-      "name": "platform",
-      "version": "3.1.6",
       "dependencies": []
     },
     {

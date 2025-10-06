@@ -3,9 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:untitled/service/local_db_service.dart';
 import '../../features/location/location_record.dart';
 import 'auth_provider.dart';
 import 'settings_provider.dart';
+
+enum SyncStatus {
+  idle,        // nothing pending
+  syncing,     // currently sending batch or retrying
+  offline,     // storing locally because no network
+}
+
+final syncStatusProvider = StateProvider<SyncStatus>((ref) => SyncStatus.idle);
 
 final locationProvider =
 StateNotifierProvider<LocationNotifier, LocationRecord?>((ref) {
@@ -113,26 +122,37 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   Future<void> _sendBatchToServer() async {
     if (_batchBuffer.isEmpty) return;
 
-    try {
-      // ✅ read ApiService instance from provider
-      final api = ref.read(apiServiceProvider);
+    // 🔄 1. Mark syncing
+    ref.read(syncStatusProvider.notifier).state = SyncStatus.syncing;
 
-      // ✅ convert our LocationRecord objects to JSON
+    try {
+      final api = ref.read(apiServiceProvider);
       final batchJson = _batchBuffer.map((e) => e.toJson()).toList();
 
       debugPrint("📦 Sending batch of ${_batchBuffer.length} points to server...");
 
-      // ✅ call the method we just added in ApiService
       await api.sendLocationBatch(batchJson);
 
       debugPrint("✅ Batch sent successfully (${_batchBuffer.length} points)");
 
-      // ✅ clear buffer + reset timer
       _batchBuffer.clear();
       _lastSentAt = DateTime.now();
+
+      // ✅ 2. Back to idle after success
+      ref.read(syncStatusProvider.notifier).state = SyncStatus.idle;
     } catch (e) {
-      debugPrint("⚠️ Failed to send batch: $e");
-      // optional: you could keep the buffer for retry logic later
+      debugPrint("⚠️ Network failed, storing ${_batchBuffer.length} points locally: $e");
+
+      // ❗ Mark offline
+      ref.read(syncStatusProvider.notifier).state = SyncStatus.offline;
+
+      // ✅ Save all points locally
+      for (final record in _batchBuffer) {
+        await LocalDbService.insertRecord(record.toJson());
+      }
+
+      _batchBuffer.clear();
+      _lastSentAt = DateTime.now();
     }
   }
 
