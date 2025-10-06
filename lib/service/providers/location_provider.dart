@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import '../../features/location/location_record.dart';
+import 'auth_provider.dart';
 import 'settings_provider.dart';
 
 final locationProvider =
@@ -14,6 +15,9 @@ StateNotifierProvider<LocationNotifier, LocationRecord?>((ref) {
 class LocationNotifier extends StateNotifier<LocationRecord?> {
   final Ref ref;
   Timer? _timer;
+
+  final List<LocationRecord> _batchBuffer = [];
+  DateTime? _lastSentAt;
 
   LocationNotifier(this.ref) : super(null) {
     // ✅ Auto restart tracking if interval changes
@@ -79,17 +83,67 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         batteryLevel: batteryLevel.toDouble(),
       );
 
-      state = record; // ✅ update provider state
+      // ✅ Update current provider state
+      state = record;
 
-      debugPrint("📡 Location stored in state: ${record.toJson()}");
+      // ✅ Add record into batch buffer
+      _batchBuffer.add(record);
+
+      debugPrint("📍 Added to batch (${_batchBuffer.length} points): ${record.toJson()}");
+
+      // ✅ Decide when to send
+      final now = DateTime.now();
+      final timeSinceLastSend = _lastSentAt == null
+          ? 999999.0
+          : now.difference(_lastSentAt!).inSeconds.toDouble();
+
+      final shouldSend = _batchBuffer.length >= 10 || timeSinceLastSend >= 30;
+
+      if (shouldSend) {
+        debugPrint("🚀 Sending batch triggered (points=${_batchBuffer.length}, "
+            "elapsed=${timeSinceLastSend.toStringAsFixed(1)}s)");
+        await _sendBatchToServer();
+      }
+
     } catch (e) {
       debugPrint("⚠️ Location update error: $e");
+    }
+  }
+
+  Future<void> _sendBatchToServer() async {
+    if (_batchBuffer.isEmpty) return;
+
+    try {
+      // ✅ read ApiService instance from provider
+      final api = ref.read(apiServiceProvider);
+
+      // ✅ convert our LocationRecord objects to JSON
+      final batchJson = _batchBuffer.map((e) => e.toJson()).toList();
+
+      debugPrint("📦 Sending batch of ${_batchBuffer.length} points to server...");
+
+      // ✅ call the method we just added in ApiService
+      await api.sendLocationBatch(batchJson);
+
+      debugPrint("✅ Batch sent successfully (${_batchBuffer.length} points)");
+
+      // ✅ clear buffer + reset timer
+      _batchBuffer.clear();
+      _lastSentAt = DateTime.now();
+    } catch (e) {
+      debugPrint("⚠️ Failed to send batch: $e");
+      // optional: you could keep the buffer for retry logic later
     }
   }
 
   Future<void> stopLocationStream() async {
     _timer?.cancel();
     _timer = null;
+
+    if (_batchBuffer.isNotEmpty) {
+      debugPrint("📤 Shift ended — sending remaining ${_batchBuffer.length} points...");
+      await _sendBatchToServer();
+    }
   }
 
   void clearLocation() {

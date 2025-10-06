@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 
 class ApiService {
   final Dio _dio;
@@ -11,6 +12,36 @@ class ApiService {
       connectTimeout: const Duration(milliseconds: 15000),
       receiveTimeout: const Duration(milliseconds: 15000),
     ));
+
+    // ✅ Add simple console logger
+    dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        debugPrint('🌐 [API Request]');
+        debugPrint('➡️ URL: ${options.uri}');
+        debugPrint('🟢 Method: ${options.method}');
+        if (options.data != null) {
+          debugPrint('📦 Body: ${options.data}');
+        }
+        return handler.next(options);
+      },
+      onResponse: (response, handler) {
+        debugPrint('✅ [API Response]');
+        debugPrint('⬅️ URL: ${response.realUri}');
+        debugPrint('📄 Status: ${response.statusCode}');
+        debugPrint('📦 Data: ${response.data}');
+        return handler.next(response);
+      },
+      onError: (DioException e, handler) {
+        debugPrint('❌ [API Error]');
+        debugPrint('⬅️ URL: ${e.requestOptions.uri}');
+        debugPrint('📄 Message: ${e.message}');
+        if (e.response != null) {
+          debugPrint('📦 Response: ${e.response?.data}');
+        }
+        return handler.next(e);
+      },
+    ));
+
     return ApiService._internal(dio);
   }
 
@@ -34,4 +65,16 @@ class ApiService {
     return await _dio.post('/api/twc_driver/attendance', data: data);
   }
 
+  /// 🔄 Send a batch of location records to the n8n webhook
+  Future<Response> sendLocationBatch(List<Map<String, dynamic>> batch) async {
+    return await _dio.post(
+      'https://n8n.rentop.in/webhook/9b65b5f1-c4d9-4b18-8d35-106c05e0fef4',
+      data: batch,
+      options: Options(
+        headers: {'Content-Type': 'application/json'},
+        sendTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+      ),
+    );
+  }
 }
