@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
-import 'service/providers/api_and_auth.dart';
+import 'service/providers/auth_provider.dart';
 import 'theme/colors.dart';
 
 void main() {

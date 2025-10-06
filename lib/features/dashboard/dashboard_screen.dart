@@ -5,10 +5,11 @@ import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/features/auth/login_screen.dart';
-import 'package:untitled/features/location/location_provider.dart';
+import 'package:untitled/features/settings/settings_screen.dart';
+import 'package:untitled/service/providers/location_provider.dart';
 import 'package:untitled/widgets/twc_toast.dart';
 import '../../theme/colors.dart';
-import '../../service/providers/api_and_auth.dart';
+import '../../service/providers/auth_provider.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -142,18 +143,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
           if (_checkedIn) {
             // ✅ Start location tracking
             try {
-              await ref.read(locationProvider.notifier).fetchCurrentLocation(
-                employeeId: employeeId,
-                deviceId: deviceId,
-              );
-
               await ref.read(locationProvider.notifier).startLocationStream(
                 employeeId: employeeId,
                 deviceId: deviceId,
               );
 
-              final loc = ref.read(locationProvider);
-              debugPrint("📡 Location stored in state: ${loc?.toJson()}");
+              debugPrint("🚀 Location tracking started for $employeeId");
             } catch (e) {
               if (!mounted) return;
               debugPrint("⚠️ Location error: $e");
@@ -320,7 +315,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
         backgroundColor: TWCColors.coffeeDark,
         centerTitle: true,
         title: const Text('Dashboard', style: TextStyle(color: Colors.white)),
-        actions: [IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: _confirmAndLogout)],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.white),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white),
+            onPressed: _confirmAndLogout,
+            tooltip: 'Logout',
+          ),
+        ],
       ),
       body: SafeArea(
         child: Padding(

@@ -10,7 +10,7 @@ import '../../theme/colors.dart';
 import '../../theme/text_styles.dart';
 import '../../widgets/twc_logo_header.dart';
 import '../../widgets/twc_primary_button.dart';
-import '../../service/providers/api_and_auth.dart';
+import '../../service/providers/auth_provider.dart';
 
 class OtpScreen extends ConsumerStatefulWidget {
   final String mobile;

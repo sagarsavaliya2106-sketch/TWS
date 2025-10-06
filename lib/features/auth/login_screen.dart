@@ -8,7 +8,7 @@ import '../../widgets/twc_primary_button.dart';
 import '../../widgets/twc_input_field.dart';
 import '../../widgets/twc_footer.dart';
 import '../../utils/validators.dart';
-import '../../service/providers/api_and_auth.dart';
+import '../../service/providers/auth_provider.dart';
 import 'otp_screen.dart';
 
 final loginLoadingProvider = StateProvider<bool>((ref) => false);
