@@ -12,12 +12,27 @@ final apiServiceProvider = Provider<ApiService>((ref) {
 class AuthState {
   final String? mobile;
   final bool loggedIn;
-  AuthState({this.mobile, this.loggedIn = false});
+  final String? employeeId;
+  final String? employeeName;
 
-  AuthState copyWith({String? mobile, bool? loggedIn}) {
+  AuthState({
+    this.mobile,
+    this.loggedIn = false,
+    this.employeeId,
+    this.employeeName,
+  });
+
+  AuthState copyWith({
+    String? mobile,
+    bool? loggedIn,
+    String? employeeId,
+    String? employeeName,
+  }) {
     return AuthState(
       mobile: mobile ?? this.mobile,
       loggedIn: loggedIn ?? this.loggedIn,
+      employeeId: employeeId ?? this.employeeId,
+      employeeName: employeeName ?? this.employeeName,
     );
   }
 }
@@ -43,38 +58,39 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final resp = await api.driverLogin(mobile);
       final data = resp.data;
+
       if (data is Map<String, dynamic>) {
         final status = data['status']?.toString();
         if (status == 'success') {
-          return {'ok': true, 'data': data};
+          final empId = data['employee_id']?.toString();
+          final empName = data['employee_name']?.toString();
+          return {'ok': true, 'employeeId': empId, 'employeeName': empName};
         } else {
-          final message = data['message']?.toString() ?? 'Mobile not registered';
-          return {'ok': false, 'message': message};
+          return {'ok': false, 'message': data['message'] ?? 'Login failed'};
         }
       } else {
         return {'ok': false, 'message': 'Unexpected server response'};
       }
-    } on DioException catch (e) {
-      String? message = e.message;
-      if (e.response != null) {
-        final d = e.response!.data;
-        if (d is Map && d['message'] != null) message = d['message'].toString();
-      }
-      return {'ok': false, 'message': message};
     } catch (e) {
       return {'ok': false, 'message': e.toString()};
     }
   }
 
   /// Mark login complete and persist mobile
-  Future<void> completeLogin() async {
-    state = state.copyWith(loggedIn: true);
+  Future<void> completeLogin({String? employeeId, String? employeeName}) async {
+    state = state.copyWith(
+      loggedIn: true,
+      employeeId: employeeId,
+      employeeName: employeeName,
+    );
+
     final sp = await SharedPreferences.getInstance();
-    final mobile = state.mobile;
-    if (mobile != null) {
-      await sp.setString('mobile', mobile);
+    if (state.mobile != null) {
+      await sp.setString('mobile', state.mobile!);
       await sp.remove('mobile_temp');
     }
+    if (employeeId != null) await sp.setString('employee_id', employeeId);
+    if (employeeName != null) await sp.setString('employee_name', employeeName);
   }
 
   /// Logout: clear saved mobile and reset state
@@ -88,9 +104,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Restore saved mobile (called at app start)
   Future<void> restoreFromPrefs() async {
     final sp = await SharedPreferences.getInstance();
-    final saved = sp.getString('mobile');
-    if (saved != null && saved.isNotEmpty) {
-      state = state.copyWith(mobile: saved, loggedIn: true);
+    final savedMobile = sp.getString('mobile');
+    final savedId = sp.getString('employee_id');
+    final savedName = sp.getString('employee_name');
+
+    if (savedMobile != null && savedMobile.isNotEmpty) {
+      state = state.copyWith(
+        mobile: savedMobile,
+        loggedIn: true,
+        employeeId: savedId,
+        employeeName: savedName,
+      );
     }
   }
 }

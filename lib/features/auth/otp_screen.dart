@@ -63,7 +63,6 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
   }
 
   Future<void> _onVerify() async {
-    // clear previous error
     if (mounted) setState(() => _errorText = null);
 
     final otp = _currentOtp;
@@ -72,28 +71,28 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
       return;
     }
 
-    // local demo OTP
     if (otp != '1234') {
       if (mounted) setState(() => _errorText = 'Invalid OTP. Use 1234 for demo.');
       return;
     }
 
-    // begin server verification flow
     if (mounted) setState(() => _loading = true);
 
     try {
-      // Save mobile locally
+      // ✅ Save mobile locally first
       await ref.read(authNotifierProvider.notifier).setMobileOnly(widget.mobile);
 
-      // call server to verify mobile
+      // ✅ Verify mobile with server
       final result = await ref.read(authNotifierProvider.notifier).verifyMobileOnServer();
 
-      // guard after awaiting network call
       if (!mounted) return;
 
       if (result['ok'] == true) {
-        // success -> complete login
-        await ref.read(authNotifierProvider.notifier).completeLogin();
+        // ✅ Pass employee info from API to AuthNotifier
+        await ref.read(authNotifierProvider.notifier).completeLogin(
+          employeeId: result['employeeId'],
+          employeeName: result['employeeName'],
+        );
 
         if (!mounted) return;
 
@@ -102,10 +101,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
               (route) => false,
         );
       } else {
-        // server returned ok == false with a message
         final msg = result['message']?.toString() ?? 'Server verification failed';
-
-        // classify network-like messages so we show the network dialog instead of raw text
         final lower = msg.toLowerCase();
         final isNetworkLike = lower.contains('failed host lookup') ||
             lower.contains('socketexception') ||
@@ -118,12 +114,10 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         if (isNetworkLike) {
           showTwcToast(context, 'Network error — please check connection', isError: true);
         } else {
-          // real validation/server error -> show inline under OTP boxes
           if (mounted) setState(() => _errorText = msg);
         }
       }
     } on DioException catch (e) {
-      // defensive handler in case verifyMobileOnServer throws directly
       String message = 'Network error. Please check your connection.';
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.receiveTimeout ||
@@ -135,9 +129,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
         final d = e.response!.data;
         if (d is Map && d['message'] != null) message = d['message'].toString();
       }
-
       if (!mounted) return;
-
       showTwcToast(context, message, isError: true);
     } catch (e) {
       if (!mounted) return;

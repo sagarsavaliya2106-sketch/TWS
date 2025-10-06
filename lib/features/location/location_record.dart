@@ -1,0 +1,33 @@
+class LocationRecord {
+  final String employeeId;
+  final String deviceId;
+  final DateTime timestamp;
+  final double latitude;
+  final double longitude;
+  final double accuracy;
+  final double batteryLevel;
+
+  LocationRecord({
+    required this.employeeId,
+    required this.deviceId,
+    required this.timestamp,
+    required this.latitude,
+    required this.longitude,
+    required this.accuracy,
+    required this.batteryLevel,
+  });
+
+  Map<String, dynamic> toJson() => {
+    "employee_id": employeeId,
+    "device_id": deviceId,
+    "timestamp": timestamp.toIso8601String(),
+    "latitude": latitude,
+    "longitude": longitude,
+    "accuracy": accuracy,
+    "battery_level": batteryLevel,
+  };
+
+  @override
+  String toString() =>
+      '📍 [${timestamp.toIso8601String()}] lat=$latitude, lng=$longitude, acc=$accuracy, battery=$batteryLevel%';
+}

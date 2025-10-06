@@ -66,7 +66,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
           });
           // auto resume tracking if still checked in
           if (_checkedIn) {
-            unawaited(ref.read(locationProvider.notifier).startLocationStream());
+            final authState = ref.read(authNotifierProvider);
+            final employeeId = authState.employeeId ?? 'unknown';
+            final deviceId = "DEVICE-${DateTime.now().millisecondsSinceEpoch}";
+
+            await ref.read(locationProvider.notifier).startLocationStream(
+              employeeId: employeeId,
+              deviceId: deviceId,
+            );
           }
         }
       }
@@ -106,16 +113,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
       showTwcToast(context, 'Mobile not found. Please login again.', isError: true);
       return;
     }
+
     if (_isLoading) return;
     setState(() => _isLoading = true);
+
     try {
       final api = ref.read(apiServiceProvider);
       final resp = await api.driverAttendance(mobile);
       if (!mounted) return;
+
       final data = resp.data;
       if (data is Map<String, dynamic>) {
         final status = data['status']?.toString().toLowerCase();
         final serverMessage = data['message']?.toString();
+
         if (status == 'success') {
           setState(() {
             _checkedIn = !_checkedIn;
@@ -123,31 +134,53 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
           });
           await _saveAttendanceToPrefs();
 
+          // ✅ Prepare IDs for location provider
+          final authState = ref.read(authNotifierProvider);
+          final employeeId = authState.employeeId ?? 'unknown';
+          final deviceId = "DEVICE-${DateTime.now().millisecondsSinceEpoch}";
+
           if (_checkedIn) {
-            // ✅ start location tracking
+            // ✅ Start location tracking
             try {
-              await ref.read(locationProvider.notifier).fetchCurrentLocation();
-              await ref.read(locationProvider.notifier).startLocationStream();
-              final pos = ref.read(locationProvider);
-              debugPrint("📍 Location: ${pos?.latitude}, ${pos?.longitude}");
+              await ref.read(locationProvider.notifier).fetchCurrentLocation(
+                employeeId: employeeId,
+                deviceId: deviceId,
+              );
+
+              await ref.read(locationProvider.notifier).startLocationStream(
+                employeeId: employeeId,
+                deviceId: deviceId,
+              );
+
+              final loc = ref.read(locationProvider);
+              debugPrint("📡 Location stored in state: ${loc?.toJson()}");
             } catch (e) {
-              debugPrint("⚠️ Location error: $e");
               if (!mounted) return;
+              debugPrint("⚠️ Location error: $e");
               showTwcToast(context, 'Location permission required for shift tracking.', isError: true);
             }
           } else {
-            // stop tracking when shift ends
+            // ✅ Stop tracking when shift ends
             await ref.read(locationProvider.notifier).stopLocationStream();
             ref.read(locationProvider.notifier).clearLocation();
+            debugPrint("🔴 Shift ended, location tracking stopped.");
           }
 
           _pulseController.forward(from: 0.0);
           if (!mounted) return;
-          showTwcToast(context, serverMessage ?? (_checkedIn ? 'Checked in' : 'Checked out'), isError: false);
+          showTwcToast(
+            context,
+            serverMessage ?? (_checkedIn ? 'Checked in' : 'Checked out'),
+            isError: false,
+          );
         } else {
           if (!mounted) return;
-          showTwcToast(context, serverMessage ?? 'Server error.', isError: true);
+          final message = serverMessage ?? 'Server returned an error.';
+          showTwcToast(context, message, isError: true);
         }
+      } else {
+        if (!mounted) return;
+        showTwcToast(context, 'Unexpected server response.', isError: true);
       }
     } on DioException catch (e) {
       String message = 'Network error.';
@@ -158,8 +191,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
       } else if (e.response?.data is Map && e.response?.data['message'] != null) {
         message = e.response!.data['message'].toString();
       }
+      if (!mounted) return;
       showTwcToast(context, message, isError: true);
     } catch (e) {
+      if (!mounted) return;
       showTwcToast(context, 'Error: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
