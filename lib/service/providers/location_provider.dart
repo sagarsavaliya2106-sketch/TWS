@@ -24,9 +24,35 @@ StateNotifierProvider<LocationNotifier, LocationRecord?>((ref) {
 class LocationNotifier extends StateNotifier<LocationRecord?> {
   final Ref ref;
   Timer? _timer;
+  Position? _lastPos;
+  DateTime? _lastPosAt;
+  bool _isMoving = false;
+  DateTime? _stationarySince;
 
   final List<LocationRecord> _batchBuffer = [];
   DateTime? _lastSentAt;
+
+  double _speedKmhFrom(Position pos) {
+    // Prefer platform-provided speed (m/s) when available
+    final s = pos.speed; // m/s, may be -1 or 0 on some devices
+    if (s.isFinite && s >= 0) {
+      final kmh = s * 3.6;
+      if (kmh > 0) return kmh;
+    }
+
+    // Fallback: distance / time between last sample and current (m / s -> km/h)
+    if (_lastPos != null && _lastPosAt != null) {
+      final seconds = DateTime.now().difference(_lastPosAt!).inSeconds;
+      if (seconds > 0) {
+        final meters = Geolocator.distanceBetween(
+          _lastPos!.latitude, _lastPos!.longitude,
+          pos.latitude, pos.longitude,
+        );
+        return (meters / seconds) * 3.6;
+      }
+    }
+    return 0.0;
+  }
 
   LocationNotifier(this.ref) : super(null) {
     // ✅ Auto restart tracking if interval changes
@@ -80,6 +106,32 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         ),
       );
 
+      // 🚗 STEP 1 — compute current speed in km/h
+      final speedKmh = _speedKmhFrom(pos);
+      debugPrint("🚗 Current speed: ${speedKmh.toStringAsFixed(1)} km/h");
+
+      // 🕒 Movement detection
+      if (speedKmh > 5) {
+        if (!_isMoving) {
+          debugPrint("🏎️ Vehicle started moving — switching to HIGH accuracy mode");
+          _isMoving = true;
+          _stationarySince = null;
+        }
+      } else {
+        if (_isMoving) {
+          // Just became stationary
+          _isMoving = false;
+          _stationarySince = DateTime.now();
+        } else {
+          // Already stationary; check duration
+          if (_stationarySince != null &&
+              DateTime.now().difference(_stationarySince!).inMinutes >= 5) {
+            debugPrint("🕯️ Stationary for 5+ minutes — switch to LOW POWER mode");
+            // TODO: we'll apply low-power GPS settings in Step 2C
+          }
+        }
+      }
+
       final batteryLevel = await battery.batteryLevel;
 
       final record = LocationRecord(
@@ -114,6 +166,9 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         await _sendBatchToServer();
       }
 
+      // 🔁 Save last position for next speed calculation
+      _lastPos = pos;
+      _lastPosAt = DateTime.now();
     } catch (e) {
       debugPrint("⚠️ Location update error: $e");
     }
