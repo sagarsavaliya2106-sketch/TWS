@@ -10,6 +10,9 @@ import 'package:untitled/service/providers/location_provider.dart';
 import 'package:untitled/widgets/twc_toast.dart';
 import '../../theme/colors.dart';
 import '../../service/providers/auth_provider.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:untitled/service/background_service.dart';
+
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -76,6 +79,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
               deviceId: deviceId,
             );
           }
+
+          await initializeService();
+          debugPrint("🔁 Background service resumed after restart");
         }
       }
     } catch (_) {}
@@ -154,11 +160,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
               debugPrint("⚠️ Location error: $e");
               showTwcToast(context, 'Location permission required for shift tracking.', isError: true);
             }
+
+            // ✅ Start background GPS service
+            await initializeService();
+            debugPrint("🛰️ Background service started");
+
           } else {
             // ✅ Stop tracking when shift ends
             await ref.read(locationProvider.notifier).stopLocationStream();
             ref.read(locationProvider.notifier).clearLocation();
             debugPrint("🔴 Shift ended, location tracking stopped.");
+
+            FlutterBackgroundService().invoke("stopService");
+            debugPrint("🛑 Background service stopped");
           }
 
           _pulseController.forward(from: 0.0);
@@ -214,6 +228,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
     if (shouldLogout == true) {
       await ref.read(authNotifierProvider.notifier).logout();
       await ref.read(locationProvider.notifier).stopLocationStream();
+      FlutterBackgroundService().invoke("stopService");
       await _clearAttendanceFromPrefs();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);

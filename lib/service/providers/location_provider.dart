@@ -29,6 +29,8 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   bool _isMoving = false;
   DateTime? _stationarySince;
 
+  LocationAccuracy _currentAccuracy = LocationAccuracy.high;
+
   final List<LocationRecord> _batchBuffer = [];
   DateTime? _lastSentAt;
 
@@ -99,12 +101,23 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       Battery battery,
       ) async {
     try {
+      // 🎯 Choose accuracy dynamically
+      if (_isMoving) {
+        _currentAccuracy = LocationAccuracy.bestForNavigation;
+      } else if (_stationarySince != null &&
+          DateTime.now().difference(_stationarySince!).inMinutes >= 5) {
+        _currentAccuracy = LocationAccuracy.low;
+      } else {
+        _currentAccuracy = LocationAccuracy.high;
+      }
+
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 10),
+        locationSettings: LocationSettings(
+          accuracy: _currentAccuracy,
+          timeLimit: const Duration(seconds: 10),
         ),
       );
+      debugPrint("🎚️ Using GPS accuracy: $_currentAccuracy");
 
       // 🚗 STEP 1 — compute current speed in km/h
       final speedKmh = _speedKmhFrom(pos);
