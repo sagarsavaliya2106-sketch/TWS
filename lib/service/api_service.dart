@@ -67,14 +67,6 @@ class ApiService {
 
   /// 🔄 Send a batch of location records to the n8n webhook
   Future<Response> sendLocationBatch(List<Map<String, dynamic>> batch) async {
-    return await _dio.post(
-      'https://n8n.rentop.in/webhook/9b65b5f1-c4d9-4b18-8d35-106c05e0fef4',
-      data: batch,
-      options: Options(
-        headers: {'Content-Type': 'application/json'},
-        sendTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
-      ),
-    );
+    return await _dio.post('/api/twc_driver/tracking', data: batch);
   }
 }

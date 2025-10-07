@@ -46,37 +46,58 @@ Future<bool> onIosBackground(ServiceInstance service) async {
 void onStart(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Listen for stop request
+  final battery = Battery();
+
+  // ✅ Step 1: Check & request location permission before anything
+  LocationPermission permission = await Geolocator.checkPermission();
+
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+
+  if (permission == LocationPermission.deniedForever ||
+      permission == LocationPermission.denied) {
+    debugPrint("❌ Location permission denied. Stopping background service.");
+    service.stopSelf();
+    return;
+  }
+
+  // ✅ Step 2: Listen for stop events
   service.on('stopService').listen((event) {
     debugPrint("🛑 Service stopped manually");
     service.stopSelf();
   });
 
-  final battery = Battery();
-
+  // ✅ Step 3: Start location updates
   Timer.periodic(const Duration(seconds: 30), (timer) async {
     if (service is AndroidServiceInstance &&
         await service.isForegroundService()) {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
+        );
 
-      final batteryLevel = await battery.batteryLevel;
+        final batteryLevel = await battery.batteryLevel;
 
-      final record = LocationRecord(
-        employeeId: "1",
-        deviceId: "BACKGROUND",
-        timestamp: DateTime.now().toUtc(),
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-        accuracy: pos.accuracy,
-        batteryLevel: batteryLevel.toDouble(),
-      );
+        final record = LocationRecord(
+          driverId: "1",
+          deviceId: "BACKGROUND",
+          timestamp: DateTime.now().toUtc(),
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+          accuracy: pos.accuracy,
+          batteryLevel: batteryLevel.toDouble(),
+        );
 
-      debugPrint("📍 BG location: ${record.toJson()}");
-      await LocalDbService.insertRecord(record.toJson());
+        debugPrint("📍 BG location: ${record.toJson()}");
+        await LocalDbService.insertRecord(record.toJson());
+      } catch (e) {
+        debugPrint("⚠️ Location fetch error: $e");
+      }
     }
   });
+
+  debugPrint("🛰️ Background service started with permission granted ✅");
 }

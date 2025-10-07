@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/features/auth/login_screen.dart';
 import 'package:untitled/features/settings/settings_screen.dart';
 import 'package:untitled/service/providers/location_provider.dart';
+import 'package:untitled/utils/permission_helper.dart';
 import 'package:untitled/widgets/twc_toast.dart';
 import '../../theme/colors.dart';
 import '../../service/providers/auth_provider.dart';
@@ -75,7 +76,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
             final deviceId = "DEVICE-${DateTime.now().millisecondsSinceEpoch}";
 
             await ref.read(locationProvider.notifier).startLocationStream(
-              employeeId: employeeId,
+              driverId: employeeId,
               deviceId: deviceId,
             );
           }
@@ -143,28 +144,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
 
           // ✅ Prepare IDs for location provider
           final authState = ref.read(authNotifierProvider);
-          final employeeId = authState.employeeId ?? 'unknown';
+          final driverId = authState.mobile ?? "";
           final deviceId = "DEVICE-${DateTime.now().millisecondsSinceEpoch}";
 
-          if (_checkedIn) {
-            // ✅ Start location tracking
-            try {
-              await ref.read(locationProvider.notifier).startLocationStream(
-                employeeId: employeeId,
-                deviceId: deviceId,
-              );
-
-              debugPrint("🚀 Location tracking started for $employeeId");
-            } catch (e) {
-              if (!mounted) return;
-              debugPrint("⚠️ Location error: $e");
-              showTwcToast(context, 'Location permission required for shift tracking.', isError: true);
+          if (_checkedIn && mounted) {
+            // ✅ Check permission before starting
+            final hasPermission = await ensureLocationPermission(context);
+            if (!hasPermission) {
+              if (!mounted) return; // 👈 Add this line
+              showTwcToast(context, 'Please enable location permission to start shift.', isError: true);
+              setState(() => _checkedIn = false);
+              await _saveAttendanceToPrefs();
+              return;
             }
+
+            // ✅ Start location tracking
+            await ref.read(locationProvider.notifier).startLocationStream(
+              driverId: driverId,
+              deviceId: deviceId,
+            );
+            debugPrint("🚀 Location tracking started for $driverId");
 
             // ✅ Start background GPS service
             await initializeService();
             debugPrint("🛰️ Background service started");
-
           } else {
             // ✅ Stop tracking when shift ends
             await ref.read(locationProvider.notifier).stopLocationStream();

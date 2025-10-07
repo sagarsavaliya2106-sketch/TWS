@@ -64,7 +64,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         final current = state;
         if (current != null) {
           await startLocationStream(
-            employeeId: current.employeeId,
+            driverId: current.driverId,
             deviceId: current.deviceId,
           );
         }
@@ -74,7 +74,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
 
   /// ✅ Immediately capture + periodically update location
   Future<void> startLocationStream({
-    required String employeeId,
+    required String driverId,
     required String deviceId,
   }) async {
     await stopLocationStream(); // Stop previous stream if any
@@ -86,17 +86,17 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
     debugPrint("🚀 GPS tracking started — collecting every $interval seconds");
 
     // ✅ Immediately capture one reading
-    await _captureAndStoreLocation(employeeId, deviceId, battery);
+    await _captureAndStoreLocation(driverId, deviceId, battery);
 
     // ✅ Then start periodic timer
     _timer = Timer.periodic(duration, (_) async {
-      await _captureAndStoreLocation(employeeId, deviceId, battery);
+      await _captureAndStoreLocation(driverId, deviceId, battery);
     });
   }
 
   /// ✅ Capture one reading and store in state
   Future<void> _captureAndStoreLocation(
-      String employeeId,
+      String driverId,
       String deviceId,
       Battery battery,
       ) async {
@@ -148,7 +148,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       final batteryLevel = await battery.batteryLevel;
 
       final record = LocationRecord(
-        employeeId: employeeId,
+        driverId: driverId,
         deviceId: deviceId,
         timestamp: DateTime.now().toUtc(),
         latitude: pos.latitude,

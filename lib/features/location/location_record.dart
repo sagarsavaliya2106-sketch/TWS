@@ -1,5 +1,5 @@
 class LocationRecord {
-  final String employeeId;
+  final String driverId;
   final String deviceId;
   final DateTime timestamp;
   final double latitude;
@@ -8,7 +8,7 @@ class LocationRecord {
   final double batteryLevel;
 
   LocationRecord({
-    required this.employeeId,
+    required this.driverId,
     required this.deviceId,
     required this.timestamp,
     required this.latitude,
@@ -19,7 +19,7 @@ class LocationRecord {
 
   Map<String, dynamic> toJson() {
     return {
-      'employee_id': employeeId,
+      'driver_id': driverId,
       'device_id': deviceId,
       'timestamp': timestamp.toUtc().toIso8601String(),
       'latitude': latitude,

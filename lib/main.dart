@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:untitled/service/background_service.dart';
 import 'package:untitled/service/local_db_service.dart';
 import 'package:untitled/service/network_monitor.dart';
 
@@ -12,9 +11,9 @@ import 'theme/colors.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocalDbService.init();
-  await initializeService();
+  // REMOVE THIS: await initializeService();
   final container = ProviderContainer();
-  container.read(networkMonitorProvider); // start monitoring
+  container.read(networkMonitorProvider);
   runApp(UncontrolledProviderScope(container: container, child: const MyApp()));
 }
 
