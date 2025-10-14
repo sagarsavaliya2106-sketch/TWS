@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:untitled/features/location/location_record.dart';
+import 'package:untitled/service/geofence_engine.dart';
 import 'package:untitled/service/local_db_service.dart';
-import '../../features/location/location_record.dart';
+import 'package:untitled/service/models/store_zone.dart';
 import 'auth_provider.dart';
 import 'settings_provider.dart';
 
@@ -28,6 +30,11 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   DateTime? _lastPosAt;
   bool _isMoving = false;
   DateTime? _stationarySince;
+
+  GeofenceEngine? _geofence;
+  List<StoreZone> _zones = [];
+  bool _autoCheckedIn = false; // track auto attendance state
+  Timer? _zonesRefreshTimer;   // optional periodic refresh
 
   LocationAccuracy _currentAccuracy = LocationAccuracy.high;
 
@@ -72,23 +79,82 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
     });
   }
 
-  /// ✅ Immediately capture + periodically update location
   Future<void> startLocationStream({
     required String driverId,
     required String deviceId,
   }) async {
-    await stopLocationStream(); // Stop previous stream if any
+    await stopLocationStream();
 
+    // 1) fetch stores once (ignore failures silently)
+    try {
+      final api = ref.read(apiServiceProvider);
+      final stores = await api.fetchStores();
+      // Filter out invalid centers or zero lat/lng
+      _zones = stores.where((s) => s.hasValidCenter).toList();
+      debugPrint("🗺️ Loaded ${_zones.length} geofence stores");
+    } catch (e) {
+      debugPrint("⚠️ Failed to load stores: $e");
+      _zones = [];
+    }
+
+    // 2) init engine with handlers
+    _geofence = GeofenceEngine(
+      onEnter: (zone, pos) async {
+        // guard: already checked-in? (via our local flag)
+        if (_autoCheckedIn) return;
+        // Use your existing attendance API (toggle)
+        final mobile = ref.read(authNotifierProvider).mobile ?? '';
+        if (mobile.isEmpty) return;
+        try {
+          debugPrint("🟢 Auto ENTER zone ${zone.name} (${zone.id}) — calling attendance (check-in)");
+          await ref.read(apiServiceProvider).driverAttendance(mobile);
+          _autoCheckedIn = true;
+        } catch (e) {
+          debugPrint("⚠️ Auto check-in failed: $e");
+        }
+      },
+      onExit: (zone, pos) async {
+        if (!_autoCheckedIn) return;
+        final mobile = ref.read(authNotifierProvider).mobile ?? '';
+        if (mobile.isEmpty) return;
+        try {
+          debugPrint("🔴 Auto EXIT zone ${zone.name} (${zone.id}) — calling attendance (check-out)");
+          await ref.read(apiServiceProvider).driverAttendance(mobile);
+          _autoCheckedIn = false;
+        } catch (e) {
+          debugPrint("⚠️ Auto check-out failed: $e");
+        }
+      },
+      // Tune thresholds if needed:
+      exitHysteresisFactor: 1.10,
+      minDwellInsideMs: 4000,
+      minDwellOutsideMs: 6000,
+      apiCooldownMs: 20000,
+      defaultRadiusMeters: 100, // TEMP until backend sends radius
+    );
+    _geofence!.setZones(_zones);
+
+    // (Optional) refresh zones every 10 minutes
+    _zonesRefreshTimer?.cancel();
+    _zonesRefreshTimer = Timer.periodic(const Duration(minutes: 10), (_) async {
+      try {
+        final api = ref.read(apiServiceProvider);
+        final stores = await api.fetchStores();
+        _zones = stores.where((s) => s.hasValidCenter).toList();
+        _geofence?.setZones(_zones);
+        debugPrint("🔄 Refreshed geofence stores: ${_zones.length}");
+      } catch (e) {
+        debugPrint("⚠️ Stores refresh failed: $e");
+      }
+    });
+
+    // your existing code continues:
     final interval = ref.read(gpsIntervalProvider);
     final duration = Duration(seconds: interval);
     final battery = Battery();
 
     debugPrint("🚀 GPS tracking started — collecting every $interval seconds");
-
-    // ✅ Immediately capture one reading
     await _captureAndStoreLocation(driverId, deviceId, battery);
-
-    // ✅ Then start periodic timer
     _timer = Timer.periodic(duration, (_) async {
       await _captureAndStoreLocation(driverId, deviceId, battery);
     });
@@ -118,6 +184,14 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         ),
       );
       debugPrint("🎚️ Using GPS accuracy: $_currentAccuracy");
+
+      try {
+        if (_geofence != null && _zones.isNotEmpty) {
+          await _geofence!.onLocation(pos);
+        }
+      } catch (e) {
+        debugPrint("⚠️ Geofence processing error: $e");
+      }
 
       // 🚗 STEP 1 — compute current speed in km/h
       final speedKmh = _speedKmhFrom(pos);
@@ -255,6 +329,8 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   Future<void> stopLocationStream() async {
     _timer?.cancel();
     _timer = null;
+    _zonesRefreshTimer?.cancel();
+    _zonesRefreshTimer = null;
 
     if (_batchBuffer.isNotEmpty) {
       debugPrint("📤 Shift ended — sending remaining ${_batchBuffer.length} points...");
@@ -269,6 +345,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   @override
   void dispose() {
     _timer?.cancel();
+    _zonesRefreshTimer?.cancel();
     super.dispose();
   }
 }

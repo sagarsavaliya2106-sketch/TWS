@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import 'models/store_zone.dart';
+
 class ApiService {
   final Dio _dio;
 
@@ -68,5 +70,25 @@ class ApiService {
   /// 🔄 Send a batch of location records to the n8n webhook
   Future<Response> sendLocationBatch(List<Map<String, dynamic>> batch) async {
     return await _dio.post('/api/twc_driver/tracking', data: batch);
+  }
+
+  // Optionally call this once after login so every call carries cookie
+  void setCookieHeader(String cookie) {
+    _dio.options.headers['Cookie'] = cookie; // e.g., "session_id=....; frontend_lang=en_US"
+  }
+
+  Future<List<StoreZone>> fetchStores() async {
+    final resp = await _dio.get('/api/twc_driver/stores');
+    if (resp.statusCode != 200) {
+      throw DioException(
+        requestOptions: resp.requestOptions,
+        response: resp,
+        message: 'Failed to fetch stores',
+        type: DioExceptionType.badResponse,
+      );
+    }
+    final data = resp.data;
+    final list = (data is Map && data['data'] is List) ? (data['data'] as List) : <dynamic>[];
+    return list.map((e) => StoreZone.fromJson(e as Map<String, dynamic>)).toList();
   }
 }
