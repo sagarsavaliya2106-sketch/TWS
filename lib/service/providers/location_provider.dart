@@ -33,7 +33,6 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
 
   GeofenceEngine? _geofence;
   List<StoreZone> _zones = [];
-  bool _autoCheckedIn = false; // track auto attendance state
   Timer? _zonesRefreshTimer;   // optional periodic refresh
 
   LocationAccuracy _currentAccuracy = LocationAccuracy.high;
@@ -97,35 +96,15 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       _zones = [];
     }
 
-    // 2) init engine with handlers
+    // 2) init geofence engine (no auto check-in/out now)
     _geofence = GeofenceEngine(
       onEnter: (zone, pos) async {
-        // guard: already checked-in? (via our local flag)
-        if (_autoCheckedIn) return;
-        // Use your existing attendance API (toggle)
-        final mobile = ref.read(authNotifierProvider).mobile ?? '';
-        if (mobile.isEmpty) return;
-        try {
-          debugPrint("🟢 Auto ENTER zone ${zone.name} (${zone.id}) — calling attendance (check-in)");
-          await ref.read(apiServiceProvider).driverAttendance(mobile);
-          _autoCheckedIn = true;
-        } catch (e) {
-          debugPrint("⚠️ Auto check-in failed: $e");
-        }
+        // 🔹 Only for debug/info — no API calls here
+        debugPrint("🟢 ENTER zone ${zone.name} (${zone.id})");
       },
       onExit: (zone, pos) async {
-        if (!_autoCheckedIn) return;
-        final mobile = ref.read(authNotifierProvider).mobile ?? '';
-        if (mobile.isEmpty) return;
-        try {
-          debugPrint("🔴 Auto EXIT zone ${zone.name} (${zone.id}) — calling attendance (check-out)");
-          await ref.read(apiServiceProvider).driverAttendance(mobile);
-          _autoCheckedIn = false;
-        } catch (e) {
-          debugPrint("⚠️ Auto check-out failed: $e");
-        }
+        debugPrint("🔴 EXIT zone ${zone.name} (${zone.id})");
       },
-      // Tune thresholds if needed:
       exitHysteresisFactor: 1.10,
       minDwellInsideMs: 4000,
       minDwellOutsideMs: 6000,

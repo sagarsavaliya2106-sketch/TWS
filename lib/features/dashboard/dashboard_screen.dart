@@ -1,19 +1,16 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
-import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled/features/auth/login_screen.dart';
 import 'package:untitled/features/settings/settings_screen.dart';
+import 'package:untitled/service/providers/auth_provider.dart';
 import 'package:untitled/service/providers/location_provider.dart';
-import 'package:untitled/utils/permission_helper.dart';
-import 'package:untitled/widgets/twc_toast.dart';
+import 'package:untitled/service/providers/attendance_ui_provider.dart';
 import '../../theme/colors.dart';
-import '../../service/providers/auth_provider.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:untitled/service/background_service.dart';
-
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -22,309 +19,227 @@ class DashboardScreen extends ConsumerStatefulWidget {
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerProviderStateMixin {
-  bool _checkedIn = false;
-  DateTime? _lastToggledAt;
-  bool _isPressed = false;
-  late final AnimationController _pulseController;
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   bool _isLoading = false;
-  OverlayEntry? _toastEntry;
+
+  void _showToast(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message,
+            style: const TextStyle(color: Colors.white, fontSize: 15)),
+        backgroundColor: isError ? Colors.redAccent : Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _saveAttendanceToPrefs(bool checkedIn) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isCheckedIn', checkedIn);
+  }
+
+  Future<bool> _restoreCheckedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('isCheckedIn') ?? false;
+  }
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600), lowerBound: 0.0, upperBound: 1.0);
-    _pulseController.addStatusListener((status) {
-      if (status == AnimationStatus.completed) _pulseController.reverse();
-    });
-    _restoreAttendanceFromPrefs();
+    _restoreState();
   }
 
-  @override
-  void dispose() {
-    _pulseController.dispose();
-    _removeToast();
-    super.dispose();
-  }
+  Future<void> _restoreState() async {
+    final checkedIn = await _restoreCheckedIn();
+    if (!mounted) return;
 
-  static const _kCheckedInKey = 'checked_in';
-  static const _kLastToggledAtKey = 'last_toggled_at';
+    final uiNotifier = ref.read(attendanceUiProvider.notifier);
+    uiNotifier.forceCheckedIn(checkedIn);
 
-  Future<void> _restoreAttendanceFromPrefs() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final savedChecked = sp.getBool(_kCheckedInKey);
-      final savedIso = sp.getString(_kLastToggledAtKey);
-      if (savedChecked != null) {
-        DateTime? dt;
-        if (savedIso != null && savedIso.isNotEmpty) {
-          try {
-            dt = DateTime.parse(savedIso);
-          } catch (_) {
-            dt = null;
-          }
-        }
-        if (mounted) {
-          setState(() {
-            _checkedIn = savedChecked;
-            _lastToggledAt = dt;
-          });
-          // auto resume tracking if still checked in
-          if (_checkedIn) {
-            final authState = ref.read(authNotifierProvider);
-            final employeeId = authState.employeeId ?? 'unknown';
-            final deviceId = "DEVICE-${DateTime.now().millisecondsSinceEpoch}";
-
-            await ref.read(locationProvider.notifier).startLocationStream(
-              driverId: employeeId,
-              deviceId: deviceId,
-            );
-          }
-
-          await initializeService();
-          debugPrint("🔁 Background service resumed after restart");
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _saveAttendanceToPrefs() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setBool(_kCheckedInKey, _checkedIn);
-      if (_lastToggledAt != null) {
-        await sp.setString(_kLastToggledAtKey, _lastToggledAt!.toIso8601String());
-      } else {
-        await sp.remove(_kLastToggledAtKey);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _clearAttendanceFromPrefs() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.remove(_kCheckedInKey);
-      await sp.remove(_kLastToggledAtKey);
-    } catch (_) {}
-  }
-
-  void _removeToast() {
-    try {
-      _toastEntry?.remove();
-    } catch (_) {}
-    _toastEntry = null;
+    if (checkedIn) {
+      final auth = ref.read(authNotifierProvider);
+      final driverId = auth.mobile ?? 'unknown';
+      await ref.read(locationProvider.notifier).startLocationStream(
+        driverId: driverId,
+        deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
+      );
+      debugPrint('🟢 Restored shift active (tracking resumed)');
+    }
   }
 
   Future<void> _performAttendance() async {
-    final mobile = ref.read(authNotifierProvider).mobile;
-    if (mobile == null || mobile.isEmpty) {
-      showTwcToast(context, 'Mobile not found. Please login again.', isError: true);
-      return;
-    }
-
     if (_isLoading) return;
     setState(() => _isLoading = true);
 
+    final uiNotifier = ref.read(attendanceUiProvider.notifier);
+    final auth = ref.read(authNotifierProvider);
+    final api = ref.read(apiServiceProvider);
+    final mobile = auth.mobile ?? '';
+
+    // ✅ STEP 1: Check permission status first
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      // ❗ Permission denied again — show dialog
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Location Permission Required'),
+          content: const Text(
+              'Location access is required to check in. Please enable location permission in settings.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Geolocator.openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      // 🚫 Permanently denied — direct to app settings
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Permission Permanently Denied'),
+          content: const Text(
+              'You have permanently denied location permission. Please enable it manually from settings.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Geolocator.openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    // ✅ STEP 2: Get current position safely
+    Position? pos;
     try {
-      final api = ref.read(apiServiceProvider);
-      final resp = await api.driverAttendance(mobile);
-      if (!mounted) return;
-
-      final data = resp.data;
-      if (data is Map<String, dynamic>) {
-        final status = data['status']?.toString().toLowerCase();
-        final serverMessage = data['message']?.toString();
-
-        if (status == 'success') {
-          setState(() {
-            _checkedIn = !_checkedIn;
-            _lastToggledAt = DateTime.now();
-          });
-          await _saveAttendanceToPrefs();
-
-          // ✅ Prepare IDs for location provider
-          final authState = ref.read(authNotifierProvider);
-          final driverId = authState.mobile ?? "";
-          final deviceId = "DEVICE-${DateTime.now().millisecondsSinceEpoch}";
-
-          if (_checkedIn && mounted) {
-            // ✅ Check permission before starting
-            final hasPermission = await ensureLocationPermission(context);
-            if (!hasPermission) {
-              if (!mounted) return; // 👈 Add this line
-              showTwcToast(context, 'Please enable location permission to start shift.', isError: true);
-              setState(() => _checkedIn = false);
-              await _saveAttendanceToPrefs();
-              return;
-            }
-
-            // ✅ Start location tracking
-            await ref.read(locationProvider.notifier).startLocationStream(
-              driverId: driverId,
-              deviceId: deviceId,
-            );
-            debugPrint("🚀 Location tracking started for $driverId");
-
-            // ✅ Start background GPS service
-            await initializeService();
-            debugPrint("🛰️ Background service started");
-          } else {
-            // ✅ Stop tracking when shift ends
-            await ref.read(locationProvider.notifier).stopLocationStream();
-            ref.read(locationProvider.notifier).clearLocation();
-            debugPrint("🔴 Shift ended, location tracking stopped.");
-
-            FlutterBackgroundService().invoke("stopService");
-            debugPrint("🛑 Background service stopped");
-          }
-
-          _pulseController.forward(from: 0.0);
-          if (!mounted) return;
-          showTwcToast(
-            context,
-            serverMessage ?? (_checkedIn ? 'Checked in' : 'Checked out'),
-            isError: false,
-          );
-        } else {
-          if (!mounted) return;
-          final message = serverMessage ?? 'Server returned an error.';
-          showTwcToast(context, message, isError: true);
-        }
-      } else {
-        if (!mounted) return;
-        showTwcToast(context, 'Unexpected server response.', isError: true);
-      }
-    } on DioException catch (e) {
-      String message = 'Network error.';
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.sendTimeout) {
-        message = 'Request timed out. Please try again.';
-      } else if (e.response?.data is Map && e.response?.data['message'] != null) {
-        message = e.response!.data['message'].toString();
-      }
-      if (!mounted) return;
-      showTwcToast(context, message, isError: true);
+      pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+        const LocationSettings(accuracy: LocationAccuracy.high),
+      );
     } catch (e) {
-      if (!mounted) return;
-      showTwcToast(context, 'Error: $e', isError: true);
+      _showToast('Location error: $e', isError: true);
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    // ✅ STEP 3: Perform check-in API call
+    try {
+      final response = await api.driverAttendance(
+        mobile: mobile,
+        lat: pos.latitude,
+        long: pos.longitude,
+      );
+
+      final data = response.data;
+      final message = data['message'] ?? 'Check-in successful';
+      _showToast(message);
+
+      uiNotifier.forceCheckedIn(true);
+      await _saveAttendanceToPrefs(true);
+
+      await ref.read(locationProvider.notifier).startLocationStream(
+        driverId: mobile,
+        deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
+      );
+
+      await uiNotifier.startCountdown(10);
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      final data = e.response?.data;
+      final action = (data is Map ? (data['action'] ?? '') : '').toString();
+      final msg = (data is Map ? (data['message'] ?? '') : '').toString();
+
+      if (code == 409 && action == 'stop_already_logged') {
+        _showToast(msg.isNotEmpty ? msg : 'Already checked in');
+        uiNotifier.forceCheckedIn(true);
+        await _saveAttendanceToPrefs(true);
+
+        await ref.read(locationProvider.notifier).startLocationStream(
+          driverId: mobile,
+          deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
+        );
+      } else {
+        _showToast(msg.isNotEmpty ? msg : 'Error occurred', isError: true);
+      }
+    } catch (e) {
+      _showToast('Error: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _confirmAndLogout() async {
+  // ✅ Logout logic
+  Future<void> _confirmAndLogout(BuildContext context, WidgetRef ref) async {
     final shouldLogout = await showDialog<bool>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Confirm logout'),
-          content: const Text('Are you sure you want to logout?'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Logout')),
-          ],
-        );
-      },
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
     );
 
     if (shouldLogout == true) {
       await ref.read(authNotifierProvider.notifier).logout();
       await ref.read(locationProvider.notifier).stopLocationStream();
-      FlutterBackgroundService().invoke("stopService");
-      await _clearAttendanceFromPrefs();
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const LoginScreen()), (route) => false);
-    }
-  }
 
-  Widget _buildAvatar(String mobile) {
-    return Row(
-      children: [
-        const CircleAvatar(radius: 24, child: Icon(Icons.person)),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Welcome,', style: TextStyle(fontSize: 14)),
-            Text(mobile, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-          ],
-        ),
-      ],
-    );
-  }
+      // 🧹 Clear attendance data
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('checked_in');
+      await prefs.remove('last_toggled_at');
 
-  Widget _buildThreeDeeButton() {
-    final outsetDecoration = BoxDecoration(
-      color: TWCColors.coffeeDark,
-      borderRadius: BorderRadius.circular(30),
-      boxShadow: _isPressed
-          ? []
-          : [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.3), offset: const Offset(6, 6), blurRadius: 12),
-        BoxShadow(color: Colors.white.withValues(alpha: 0.2), offset: const Offset(-6, -6), blurRadius: 12),
-      ],
-    );
-
-    final insetDecoration = BoxDecoration(
-      color: TWCColors.latteBg,
-      borderRadius: BorderRadius.circular(30),
-      boxShadow: [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.2), offset: const Offset(-4, -4), blurRadius: 8),
-        BoxShadow(color: Colors.white.withValues(alpha: 0.8), offset: const Offset(4, 4), blurRadius: 8),
-      ],
-    );
-
-    final isCheckedIn = _checkedIn;
-    final decoration = isCheckedIn ? insetDecoration : outsetDecoration;
-    final icon = isCheckedIn ? Icons.stop_rounded : Icons.play_arrow_rounded;
-    final label = isCheckedIn ? 'End Shift' : 'Start Shift';
-    final textColor = isCheckedIn ? TWCColors.coffeeDark : Colors.white;
-
-    if (_isLoading) {
-      return Container(
-        height: 80,
-        alignment: Alignment.center,
-        decoration: insetDecoration,
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: TWCColors.coffeeDark)),
-            SizedBox(width: 16),
-            Text('Please wait...', style: TextStyle(fontSize: 18, color: TWCColors.coffeeDark)),
-          ],
-        ),
+      if (!context.mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (route) => false,
       );
     }
-
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _isPressed = true),
-      onTapUp: (_) {
-        setState(() => _isPressed = false);
-        _performAttendance();
-      },
-      onTapCancel: () => setState(() => _isPressed = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        height: 80,
-        transform: _isPressed ? Matrix4.translationValues(2, 2, 0) : Matrix4.identity(),
-        decoration: decoration,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: textColor, size: 30),
-            const SizedBox(width: 12),
-            Text(label, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textColor)),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final ui = ref.watch(attendanceUiProvider);
     final auth = ref.watch(authNotifierProvider);
-    final mobile = auth.mobile ?? 'Unknown';
     final pos = ref.watch(locationProvider);
     final syncStatus = ref.watch(syncStatusProvider);
 
@@ -347,7 +262,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _confirmAndLogout,
+            onPressed: () async {
+              await _confirmAndLogout(context, ref);
+            },
             tooltip: 'Logout',
           ),
         ],
@@ -358,33 +275,45 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
           child: Column(
             children: [
               const SizedBox(height: 18),
-              Align(alignment: Alignment.centerLeft, child: _buildAvatar(mobile)),
+              _buildAvatar(auth.mobile ?? ''),
               Expanded(
                 child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Padding(padding: const EdgeInsets.symmetric(horizontal: 20.0), child: _buildThreeDeeButton()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                        child: _buildCheckInButton(ui),
+                      ),
                       const SizedBox(height: 32),
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
                         child: Column(
-                          key: ValueKey<bool>(_checkedIn),
+                          key: ValueKey<bool>(ui.checkedIn),
                           children: [
                             Text(
-                              _checkedIn ? 'Shift is Active' : 'You Are Off Duty',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                              ui.checkedIn
+                                  ? 'Shift is Active'
+                                  : 'You Are Off Duty',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                            if (_lastToggledAt != null) ...[
-                              const SizedBox(height: 6),
-                              Text('Last: ${DateFormat('hh:mm:ss a, dd MMM yyyy').format(_lastToggledAt!)}',
-                                  style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                            ],
+                            const SizedBox(height: 6),
+                            Text(
+                              'Last: ${DateFormat('hh:mm:ss a, dd MMM yyyy').format(DateTime.now())}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.black54,
+                              ),
+                            ),
                             if (pos != null) ...[
                               const SizedBox(height: 6),
                               Text(
                                 'Location: ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
-                                style: const TextStyle(fontSize: 13, color: Colors.black54),
+                                style: const TextStyle(
+                                    fontSize: 13, color: Colors.black54),
                               ),
                               const SizedBox(height: 4),
                               _buildSyncBadge(syncStatus),
@@ -398,7 +327,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
               ),
               const Padding(
                 padding: EdgeInsets.only(bottom: 18),
-                child: Text('Press the button to start or end your shift', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                child: Text(
+                  'Press the button to Check-In',
+                  style: TextStyle(fontSize: 13, color: Colors.black54),
+                ),
               ),
             ],
           ),
@@ -407,23 +339,145 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> with TickerPr
     );
   }
 
+  Widget _buildAvatar(String mobile) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Row(
+        children: [
+          const CircleAvatar(radius: 24, child: Icon(Icons.person)),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Welcome,', style: TextStyle(fontSize: 14)),
+              Text(
+                mobile,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckInButton(AttendanceUiState ui) {
+    final notifier = ref.read(attendanceUiProvider.notifier);
+
+    final outsetDecoration = BoxDecoration(
+      color: TWCColors.coffeeDark,
+      borderRadius: BorderRadius.circular(30),
+      boxShadow: ui.isPressed
+          ? []
+          : [
+        BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            offset: const Offset(6, 6),
+            blurRadius: 12),
+        BoxShadow(
+            color: Colors.white.withValues(alpha: 0.2),
+            offset: const Offset(-6, -6),
+            blurRadius: 12),
+      ],
+    );
+
+    final insetDecoration = BoxDecoration(
+      color: TWCColors.latteBg,
+      borderRadius: BorderRadius.circular(30),
+      boxShadow: [
+        BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            offset: const Offset(-4, -4),
+            blurRadius: 8),
+        BoxShadow(
+            color: Colors.white.withValues(alpha: 0.8),
+            offset: const Offset(4, 4),
+            blurRadius: 8),
+      ],
+    );
+
+    if (_isLoading || ui.countdown > 0) {
+      return Container(
+        height: 80,
+        alignment: Alignment.center,
+        decoration: insetDecoration,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: TWCColors.coffeeDark,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Text(
+              ui.countdown > 0
+                  ? 'Please wait (${ui.countdown}s)...'
+                  : 'Checking in...',
+              style: const TextStyle(
+                  fontSize: 18, color: TWCColors.coffeeDark),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTapDown: (_) => Future.microtask(() {
+        if (mounted) notifier.setPressed(true);
+      }),
+      onTapUp: (_) async {
+        Future.microtask(() {
+          if (mounted) notifier.setPressed(false);
+        });
+        await _performAttendance();
+      },
+      onTapCancel: () => Future.microtask(() {
+        if (mounted) notifier.setPressed(false);
+      }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 80,
+        transform: ui.isPressed
+            ? Matrix4.translationValues(2, 2, 0)
+            : Matrix4.identity(),
+        decoration: outsetDecoration,
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.play_arrow_rounded, color: Colors.white, size: 30),
+            SizedBox(width: 12),
+            Text(
+              'Check In',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSyncBadge(SyncStatus status) {
     switch (status) {
       case SyncStatus.syncing:
-        return const Text(
-          '⏳ Syncing...',
-          style: TextStyle(color: Colors.orange, fontSize: 13),
-        );
+        return const Text('⏳ Syncing...',
+            style: TextStyle(color: Colors.orange, fontSize: 13));
       case SyncStatus.offline:
-        return const Text(
-          '⚠️ Offline — saving locally',
-          style: TextStyle(color: Colors.redAccent, fontSize: 13),
-        );
+        return const Text('⚠️ Offline — saving locally',
+            style: TextStyle(color: Colors.redAccent, fontSize: 13));
       case SyncStatus.idle:
-      return const Text(
-          '✅ All data synced',
-          style: TextStyle(color: Colors.green, fontSize: 13),
-        );
+        return const Text('✅ All data synced',
+            style: TextStyle(color: Colors.green, fontSize: 13));
     }
   }
 }

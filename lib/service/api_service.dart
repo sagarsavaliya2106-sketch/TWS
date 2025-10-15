@@ -47,24 +47,22 @@ class ApiService {
     return ApiService._internal(dio);
   }
 
-  Future<Response> login(String mobile) async {
-    final data = {'mobile': mobile};
-    return await _dio.post('/login', data: data);
-  }
-
-  Future<Response> checkIn(String mobile) async {
-    final data = {'mobile': mobile};
-    return await _dio.post('/check-in', data: data);
-  }
-
   Future<Response> driverLogin(String mobile) async {
     final data = {'mobile': mobile};
     return await _dio.post('/api/twc_driver/login', data: data);
   }
 
-  Future<Response> driverAttendance(String mobile) async {
-    final data = {'mobile': mobile};
-    return await _dio.post('/api/twc_driver/attendance', data: data);
+  Future<Response> driverAttendance({
+    required String mobile,
+    required double lat,
+    required double long,
+  }) async {
+    final data = {
+      'mobile': mobile,
+      'lat': lat,
+      'long': long,
+    };
+    return await _dio.post('/api/twc_driver/check-in-out', data: data);
   }
 
   /// 🔄 Send a batch of location records to the n8n webhook
