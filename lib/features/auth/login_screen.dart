@@ -46,13 +46,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     ref.read(loginLoadingProvider.notifier).state = false;
 
+    if (!context.mounted) return;
+
     if (result['ok'] == true) {
-      await ref.read(authNotifierProvider.notifier).setMobileOnly(mobile);
-      if (!mounted) return;
-      Navigator.push(context, MaterialPageRoute(builder: (_) => OtpScreen(mobile: mobile)));
+      if (mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => OtpScreen(mobile: mobile)));
+      }
     } else {
       final msg = result['message'] ?? 'Failed to send OTP';
-      showTwcToast(context, msg, isError: true);
+      if (mounted) {
+        showTwcToast(context, msg, isError: true);
+      }
     }
   }
 
