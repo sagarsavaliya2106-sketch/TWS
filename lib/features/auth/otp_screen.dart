@@ -85,13 +85,15 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
       final result = await ref.read(authNotifierProvider.notifier).verifyOtp(widget.mobile, otp);
 
       if (result['ok'] == true) {
-        await ref.read(authNotifierProvider.notifier).completeLogin();
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
-                (route) => false,
-          );
-        }
+        await ref.read(authNotifierProvider.notifier).completeLogin(
+          mobile: widget.mobile, // ✅ ensure mobile saved
+        );
+
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+              (route) => false,
+        );
       } else {
         final msg = result['message'] ?? 'Invalid or expired OTP';
         if (mounted) {

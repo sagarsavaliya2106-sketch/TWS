@@ -86,6 +86,24 @@ class ApiService {
     throw Exception('Failed to fetch tracking logs');
   }
 
+  Future<List<Map<String, dynamic>>> fetchCheckInOutLogs(String mobile, {int limit = 10}) async {
+    final resp = await _dio.get(
+      '/api/twc_driver/check-in-out',
+      queryParameters: {
+        'mobile': mobile,
+        // 'limit': limit,
+      },
+    );
+
+    if (resp.statusCode == 200 && resp.data is Map) {
+      final data = resp.data['data'];
+      if (data is List) {
+        return data.map((e) => e as Map<String, dynamic>).toList();
+      }
+    }
+    throw Exception('Failed to fetch check-in/out logs');
+  }
+
   void setCookieHeader(String cookie) {
     _dio.options.headers['Cookie'] = cookie;
   }

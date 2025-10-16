@@ -11,12 +11,17 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentInterval = ref.watch(gpsIntervalProvider);
     final trackingAsync = ref.watch(trackingLogsProvider);
+    final checkInOutAsync = ref.watch(checkInOutLogsProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('App Settings'),
+        title: const Text(
+          'App Settings',
+          style: TextStyle(color: Colors.white),
+        ),
         backgroundColor: TWCColors.coffeeDark,
         centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white), // ✅ makes back arrow white
       ),
       backgroundColor: TWCColors.latteBg,
       body: Padding(
@@ -63,6 +68,7 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 28),
 
+            // 🔹 Section 1 — Tracking Logs
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -77,62 +83,94 @@ class SettingsScreen extends ConsumerWidget {
                 IconButton(
                   icon: const Icon(Icons.refresh),
                   color: TWCColors.coffeeDark,
-                  onPressed: () {
-                    ref.invalidate(trackingLogsProvider);
-                  },
+                  onPressed: () => ref.invalidate(trackingLogsProvider),
                 ),
               ],
             ),
-
             Expanded(
+              flex: 1,
               child: trackingAsync.when(
                 data: (list) {
                   if (list.isEmpty) {
-                    return const Center(
-                      child: Text('No tracking data available',
-                          style: TextStyle(color: Colors.black54)),
-                    );
+                    return const Center(child: Text('No tracking data'));
                   }
-
                   return ListView.separated(
                     itemCount: list.length,
                     separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.black12),
                     itemBuilder: (_, i) {
-                      final item = list[i];
-                      final time = item['timestamp'] ?? '';
-                      final lat = item['latitude'];
-                      final lon = item['longitude'];
-                      final acc = item['accuracy'];
-                      final bat = item['battery_level'];
-
+                      final e = list[i];
                       return ListTile(
-                        title: Text(
-                          '$time',
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: TWCColors.coffeeDark,
-                          ),
-                        ),
+                        title: Text(e['timestamp'] ?? ''),
                         subtitle: Text(
-                          'Lat: $lat, Lon: $lon\nAccuracy: ${acc?.toStringAsFixed(1)}m, Battery: ${bat?.toStringAsFixed(0)}%',
-                          style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.3),
+                          'Lat: ${e['latitude']}, Lon: ${e['longitude']}\n'
+                              'Acc: ${e['accuracy']}m, battery_level: ${e['battery_level']}%',
+                          style: const TextStyle(height: 1.3),
                         ),
                         dense: true,
-                        visualDensity: VisualDensity.compact,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                       );
                     },
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (err, _) => Center(
-                  child: Text(
-                    'Failed to load logs\n$err',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.redAccent),
+                error: (err, _) => Center(child: Text('Error: $err')),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 🔹 Section 2 — Check-In / Check-Out Logs
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Latest Check-In Logs',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: TWCColors.coffeeDark,
                   ),
                 ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  color: TWCColors.coffeeDark,
+                  onPressed: () => ref.invalidate(checkInOutLogsProvider),
+                ),
+              ],
+            ),
+            Expanded(
+              flex: 1,
+              child: checkInOutAsync.when(
+                data: (list) {
+                  if (list.isEmpty) {
+                    return const Center(child: Text('No check-in/out data'));
+                  }
+                  return ListView.separated(
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.black12),
+                    itemBuilder: (_, i) {
+                      final e = list[i];
+                      final wh = e['warehouse_name'] ?? e['store_name'] ?? '-';
+                      final locType = e['location_type'] ?? '—';
+                      final status = e['trip_status'] ?? '';
+                      final time = e['timestamp'] ?? '';
+                      return ListTile(
+                        leading: Icon(
+                          status == 'in_progress' ? Icons.play_arrow_rounded : Icons.stop_circle_outlined,
+                          color: status == 'in_progress'
+                              ? Colors.green
+                              : Colors.redAccent,
+                        ),
+                        title: Text('$locType: $wh'),
+                        subtitle: Text(
+                          'Status: $status\nTime: $time\nLat: ${e['latitude']}, Lon: ${e['longitude']}',
+                          style: const TextStyle(height: 1.3),
+                        ),
+                        dense: true,
+                      );
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (err, _) => Center(child: Text('Error: $err')),
               ),
             ),
           ],

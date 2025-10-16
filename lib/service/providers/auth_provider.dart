@@ -81,13 +81,24 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<void> completeLogin({String? employeeId, String? employeeName}) async {
-    state = state.copyWith(loggedIn: true);
+  Future<void> completeLogin({String? mobile, String? employeeId, String? employeeName}) async {
+    // ✅ Ensure mobile is kept from state or passed explicitly
+    final finalMobile = mobile ?? state.mobile;
+
+    state = state.copyWith(
+      mobile: finalMobile,
+      loggedIn: true,
+      employeeId: employeeId,
+      employeeName: employeeName,
+    );
+
     final sp = await SharedPreferences.getInstance();
-    if (state.mobile != null) {
-      await sp.setString('mobile', state.mobile!);
+    if (finalMobile != null && finalMobile.isNotEmpty) {
+      await sp.setString('mobile', finalMobile);
       await sp.remove('mobile_temp');
     }
+    if (employeeId != null) await sp.setString('employee_id', employeeId);
+    if (employeeName != null) await sp.setString('employee_name', employeeName);
   }
 
   Future<void> logout() async {
@@ -99,8 +110,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> restoreFromPrefs() async {
     final sp = await SharedPreferences.getInstance();
     final savedMobile = sp.getString('mobile');
-    if (savedMobile != null) {
-      state = state.copyWith(mobile: savedMobile, loggedIn: true);
+    final savedId = sp.getString('employee_id');
+    final savedName = sp.getString('employee_name');
+
+    if (savedMobile != null && savedMobile.isNotEmpty) {
+      state = state.copyWith(
+        mobile: savedMobile,
+        loggedIn: true,
+        employeeId: savedId,
+        employeeName: savedName,
+      );
     }
   }
 }
