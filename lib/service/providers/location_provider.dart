@@ -4,9 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:untitled/features/location/location_record.dart';
-import 'package:untitled/service/geofence_engine.dart';
 import 'package:untitled/service/local_db_service.dart';
-import 'package:untitled/service/models/store_zone.dart';
 import 'auth_provider.dart';
 import 'settings_provider.dart';
 
@@ -26,44 +24,18 @@ StateNotifierProvider<LocationNotifier, LocationRecord?>((ref) {
 class LocationNotifier extends StateNotifier<LocationRecord?> {
   final Ref ref;
   Timer? _timer;
+
   Position? _lastPos;
   DateTime? _lastPosAt;
   bool _isMoving = false;
   DateTime? _stationarySince;
-
-  GeofenceEngine? _geofence;
-  List<StoreZone> _zones = [];
-  Timer? _zonesRefreshTimer;   // optional periodic refresh
-
   LocationAccuracy _currentAccuracy = LocationAccuracy.high;
 
   final List<LocationRecord> _batchBuffer = [];
   DateTime? _lastSentAt;
 
-  double _speedKmhFrom(Position pos) {
-    // Prefer platform-provided speed (m/s) when available
-    final s = pos.speed; // m/s, may be -1 or 0 on some devices
-    if (s.isFinite && s >= 0) {
-      final kmh = s * 3.6;
-      if (kmh > 0) return kmh;
-    }
-
-    // Fallback: distance / time between last sample and current (m / s -> km/h)
-    if (_lastPos != null && _lastPosAt != null) {
-      final seconds = DateTime.now().difference(_lastPosAt!).inSeconds;
-      if (seconds > 0) {
-        final meters = Geolocator.distanceBetween(
-          _lastPos!.latitude, _lastPos!.longitude,
-          pos.latitude, pos.longitude,
-        );
-        return (meters / seconds) * 3.6;
-      }
-    }
-    return 0.0;
-  }
-
   LocationNotifier(this.ref) : super(null) {
-    // ✅ Auto restart tracking if interval changes
+    // ✅ Restart tracking if GPS interval changes dynamically
     ref.listen<int>(gpsIntervalProvider, (previous, next) async {
       if (_timer != null) {
         debugPrint("⚙️ Interval changed from $previous → $next seconds, restarting tracking...");
@@ -84,69 +56,44 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   }) async {
     await stopLocationStream();
 
-    // 1) fetch stores once (ignore failures silently)
-    try {
-      final api = ref.read(apiServiceProvider);
-      final stores = await api.fetchStores();
-      // Filter out invalid centers or zero lat/lng
-      _zones = stores.where((s) => s.hasValidCenter).toList();
-      debugPrint("🗺️ Loaded ${_zones.length} geofence stores");
-    } catch (e) {
-      debugPrint("⚠️ Failed to load stores: $e");
-      _zones = [];
-    }
-
-    // 2) init geofence engine (no auto check-in/out now)
-    _geofence = GeofenceEngine(
-      onEnter: (zone, pos) async {
-        // 🔹 Only for debug/info — no API calls here
-        debugPrint("🟢 ENTER zone ${zone.name} (${zone.id})");
-      },
-      onExit: (zone, pos) async {
-        debugPrint("🔴 EXIT zone ${zone.name} (${zone.id})");
-      },
-      exitHysteresisFactor: 1.10,
-      minDwellInsideMs: 4000,
-      minDwellOutsideMs: 6000,
-      apiCooldownMs: 20000,
-      defaultRadiusMeters: 100, // TEMP until backend sends radius
-    );
-    _geofence!.setZones(_zones);
-
-    // (Optional) refresh zones every 10 minutes
-    _zonesRefreshTimer?.cancel();
-    _zonesRefreshTimer = Timer.periodic(const Duration(minutes: 10), (_) async {
-      try {
-        final api = ref.read(apiServiceProvider);
-        final stores = await api.fetchStores();
-        _zones = stores.where((s) => s.hasValidCenter).toList();
-        _geofence?.setZones(_zones);
-        debugPrint("🔄 Refreshed geofence stores: ${_zones.length}");
-      } catch (e) {
-        debugPrint("⚠️ Stores refresh failed: $e");
-      }
-    });
-
-    // your existing code continues:
     final interval = ref.read(gpsIntervalProvider);
     final duration = Duration(seconds: interval);
     final battery = Battery();
 
     debugPrint("🚀 GPS tracking started — collecting every $interval seconds");
     await _captureAndStoreLocation(driverId, deviceId, battery);
+
     _timer = Timer.periodic(duration, (_) async {
       await _captureAndStoreLocation(driverId, deviceId, battery);
     });
   }
 
-  /// ✅ Capture one reading and store in state
+  double _speedKmhFrom(Position pos) {
+    final s = pos.speed; // m/s
+    if (s.isFinite && s >= 0) {
+      final kmh = s * 3.6;
+      if (kmh > 0) return kmh;
+    }
+    if (_lastPos != null && _lastPosAt != null) {
+      final seconds = DateTime.now().difference(_lastPosAt!).inSeconds;
+      if (seconds > 0) {
+        final meters = Geolocator.distanceBetween(
+          _lastPos!.latitude, _lastPos!.longitude,
+          pos.latitude, pos.longitude,
+        );
+        return (meters / seconds) * 3.6;
+      }
+    }
+    return 0.0;
+  }
+
   Future<void> _captureAndStoreLocation(
       String driverId,
       String deviceId,
       Battery battery,
       ) async {
     try {
-      // 🎯 Choose accuracy dynamically
+      // 🔧 Adjust accuracy based on motion
       if (_isMoving) {
         _currentAccuracy = LocationAccuracy.bestForNavigation;
       } else if (_stationarySince != null &&
@@ -162,39 +109,23 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
           timeLimit: const Duration(seconds: 10),
         ),
       );
-      debugPrint("🎚️ Using GPS accuracy: $_currentAccuracy");
 
-      try {
-        if (_geofence != null && _zones.isNotEmpty) {
-          await _geofence!.onLocation(pos);
-        }
-      } catch (e) {
-        debugPrint("⚠️ Geofence processing error: $e");
-      }
-
-      // 🚗 STEP 1 — compute current speed in km/h
       final speedKmh = _speedKmhFrom(pos);
       debugPrint("🚗 Current speed: ${speedKmh.toStringAsFixed(1)} km/h");
 
-      // 🕒 Movement detection
       if (speedKmh > 5) {
         if (!_isMoving) {
-          debugPrint("🏎️ Vehicle started moving — switching to HIGH accuracy mode");
+          debugPrint("🏎️ Vehicle started moving — switching to HIGH accuracy");
           _isMoving = true;
           _stationarySince = null;
         }
       } else {
         if (_isMoving) {
-          // Just became stationary
           _isMoving = false;
           _stationarySince = DateTime.now();
-        } else {
-          // Already stationary; check duration
-          if (_stationarySince != null &&
-              DateTime.now().difference(_stationarySince!).inMinutes >= 5) {
-            debugPrint("🕯️ Stationary for 5+ minutes — switch to LOW POWER mode");
-            // TODO: we'll apply low-power GPS settings in Step 2C
-          }
+        } else if (_stationarySince != null &&
+            DateTime.now().difference(_stationarySince!).inMinutes >= 5) {
+          debugPrint("🕯️ Stationary for 5+ min — low power mode");
         }
       }
 
@@ -213,30 +144,26 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       // ✅ Update current provider state
       state = record;
 
-      // ✅ Add record into batch buffer
+      // ✅ Add to batch
       _batchBuffer.add(record);
-
-      debugPrint("📍 Added to batch (${_batchBuffer.length} points): ${record.toJson()}");
+      debugPrint("📍 Added to batch (${_batchBuffer.length}): ${record.toJson()}");
 
       // ✅ Decide when to send
       final now = DateTime.now();
-      final timeSinceLastSend = _lastSentAt == null
-          ? 999999.0
-          : now.difference(_lastSentAt!).inSeconds.toDouble();
-
+      final timeSinceLastSend =
+      _lastSentAt == null ? 999999.0 : now.difference(_lastSentAt!).inSeconds.toDouble();
       final shouldSend = _batchBuffer.length >= 10 || timeSinceLastSend >= 30;
 
       if (shouldSend) {
-        debugPrint("🚀 Sending batch triggered (points=${_batchBuffer.length}, "
+        debugPrint("🚀 Sending batch (${_batchBuffer.length} points, "
             "elapsed=${timeSinceLastSend.toStringAsFixed(1)}s)");
         await _sendBatchToServer();
       }
 
-      // 🔁 Save last position for next speed calculation
       _lastPos = pos;
       _lastPosAt = DateTime.now();
     } catch (e) {
-      debugPrint("⚠️ Location update error: $e");
+      debugPrint("⚠️ Location capture error: $e");
     }
   }
 
@@ -249,16 +176,11 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       }
 
       debugPrint("📤 Found ${pending.length} offline records — syncing...");
-
       final api = ref.read(apiServiceProvider);
       await api.sendLocationBatch(pending);
-
       debugPrint("✅ Synced ${pending.length} offline records");
 
-      // ✅ Clear all synced records
       await LocalDbService.clearAll();
-
-      // ✅ Then cleanup old (>2 days) data
       await LocalDbService.deleteOldRecords();
     } catch (e) {
       debugPrint("⚠️ Offline sync failed: $e");
@@ -268,34 +190,24 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   Future<void> _sendBatchToServer() async {
     if (_batchBuffer.isEmpty) return;
 
-    // 🔄 1. Mark syncing
     ref.read(syncStatusProvider.notifier).state = SyncStatus.syncing;
-
     try {
       final api = ref.read(apiServiceProvider);
       final batchJson = _batchBuffer.map((e) => e.toJson()).toList();
 
-      debugPrint("📦 Sending batch of ${_batchBuffer.length} points to server...");
-
+      debugPrint("📦 Sending ${_batchBuffer.length} points...");
       await api.sendLocationBatch(batchJson);
-
-      debugPrint("✅ Batch sent successfully (${_batchBuffer.length} points)");
+      debugPrint("✅ Batch sent successfully");
 
       _batchBuffer.clear();
       _lastSentAt = DateTime.now();
 
-      // 🔁 Try syncing any offline data (if available)
       await _syncOfflineRecords();
-
-      // ✅ 2. Back to idle after success
       ref.read(syncStatusProvider.notifier).state = SyncStatus.idle;
     } catch (e) {
-      debugPrint("⚠️ Network failed, storing ${_batchBuffer.length} points locally: $e");
-
-      // ❗ Mark offline
+      debugPrint("⚠️ Network failed — storing ${_batchBuffer.length} locally: $e");
       ref.read(syncStatusProvider.notifier).state = SyncStatus.offline;
 
-      // ✅ Save all points locally
       for (final record in _batchBuffer) {
         await LocalDbService.insertRecord(record.toJson());
       }
@@ -308,11 +220,9 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   Future<void> stopLocationStream() async {
     _timer?.cancel();
     _timer = null;
-    _zonesRefreshTimer?.cancel();
-    _zonesRefreshTimer = null;
 
     if (_batchBuffer.isNotEmpty) {
-      debugPrint("📤 Shift ended — sending remaining ${_batchBuffer.length} points...");
+      debugPrint("📤 Stopping tracking — sending remaining ${_batchBuffer.length} points...");
       await _sendBatchToServer();
     }
   }
@@ -324,7 +234,6 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   @override
   void dispose() {
     _timer?.cancel();
-    _zonesRefreshTimer?.cancel();
     super.dispose();
   }
 }
