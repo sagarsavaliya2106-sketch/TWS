@@ -1,8 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
-import 'models/store_zone.dart';
-
 class ApiService {
   final Dio _dio;
 
@@ -15,15 +13,12 @@ class ApiService {
       receiveTimeout: const Duration(milliseconds: 15000),
     ));
 
-    // ✅ Add simple console logger
     dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) {
         debugPrint('🌐 [API Request]');
         debugPrint('➡️ URL: ${options.uri}');
         debugPrint('🟢 Method: ${options.method}');
-        if (options.data != null) {
-          debugPrint('📦 Body: ${options.data}');
-        }
+        if (options.data != null) debugPrint('📦 Body: ${options.data}');
         return handler.next(options);
       },
       onResponse: (response, handler) {
@@ -37,9 +32,7 @@ class ApiService {
         debugPrint('❌ [API Error]');
         debugPrint('⬅️ URL: ${e.requestOptions.uri}');
         debugPrint('📄 Message: ${e.message}');
-        if (e.response != null) {
-          debugPrint('📦 Response: ${e.response?.data}');
-        }
+        if (e.response != null) debugPrint('📦 Response: ${e.response?.data}');
         return handler.next(e);
       },
     ));
@@ -47,8 +40,18 @@ class ApiService {
     return ApiService._internal(dio);
   }
 
-  Future<Response> driverLogin(String mobile) async {
-    final data = {'mobile': mobile};
+  /// Step 1 — send OTP
+  Future<Response> sendOtp(String mobileNo) async {
+    final data = {'mobile_no': mobileNo};
+    return await _dio.post('/api/twc_driver/send_otp', data: data);
+  }
+
+  /// Step 2 — verify OTP & login
+  Future<Response> verifyOtp(String mobileNo, String otpCode) async {
+    final data = {
+      'mobile_no': mobileNo,
+      'otp_code': otpCode,
+    };
     return await _dio.post('/api/twc_driver/login', data: data);
   }
 
@@ -57,36 +60,15 @@ class ApiService {
     required double lat,
     required double long,
   }) async {
-    final data = {
-      'mobile': mobile,
-      'lat': lat,
-      'long': long,
-    };
+    final data = {'mobile': mobile, 'lat': lat, 'long': long};
     return await _dio.post('/api/twc_driver/check-in-out', data: data);
   }
 
-  /// 🔄 Send a batch of location records to the n8n webhook
   Future<Response> sendLocationBatch(List<Map<String, dynamic>> batch) async {
     return await _dio.post('/api/twc_driver/tracking', data: batch);
   }
 
-  // Optionally call this once after login so every call carries cookie
   void setCookieHeader(String cookie) {
-    _dio.options.headers['Cookie'] = cookie; // e.g., "session_id=....; frontend_lang=en_US"
-  }
-
-  Future<List<StoreZone>> fetchStores() async {
-    final resp = await _dio.get('/api/twc_driver/stores');
-    if (resp.statusCode != 200) {
-      throw DioException(
-        requestOptions: resp.requestOptions,
-        response: resp,
-        message: 'Failed to fetch stores',
-        type: DioExceptionType.badResponse,
-      );
-    }
-    final data = resp.data;
-    final list = (data is Map && data['data'] is List) ? (data['data'] as List) : <dynamic>[];
-    return list.map((e) => StoreZone.fromJson(e as Map<String, dynamic>)).toList();
+    _dio.options.headers['Cookie'] = cookie;
   }
 }

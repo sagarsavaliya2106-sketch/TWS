@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,8 +20,8 @@ class OtpScreen extends ConsumerStatefulWidget {
 }
 
 class _OtpScreenState extends ConsumerState<OtpScreen> {
-  final List<TextEditingController> _controllers = List.generate(4, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
+  final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
   bool _loading = false;
   String? _errorText;
 
@@ -41,23 +40,32 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
 
   void _onDigitChanged(String value, int index) {
     final cleaned = value.replaceAll(RegExp(r'\s+'), '');
+
+    // ✅ If user pasted multiple digits (e.g. from clipboard)
     if (cleaned.length > 1) {
       final digits = cleaned.split('');
       var pos = index;
       for (var d in digits) {
-        if (pos < 4) {
+        if (pos < _controllers.length) {
           _controllers[pos].text = d;
           pos++;
         }
       }
-      final next = pos < 4 ? pos : 3;
+
+      // move focus to next empty box or last
+      final next = pos < _controllers.length ? pos : _controllers.length - 1;
       _focusNodes[next].requestFocus();
       setState(() {});
       return;
     }
 
+    // ✅ If user types a single digit
     if (value.isNotEmpty) {
-      if (index < 3) _focusNodes[index + 1].requestFocus();
+      if (index < _controllers.length - 1) {
+        _focusNodes[index + 1].requestFocus();
+      } else {
+        _focusNodes[index].unfocus();
+      }
     }
     setState(() {});
   }
@@ -66,76 +74,35 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     if (mounted) setState(() => _errorText = null);
 
     final otp = _currentOtp;
-    if (otp.length != 4 || otp.contains(RegExp(r'\D'))) {
-      if (mounted) setState(() => _errorText = 'Please enter the 4-digit OTP');
-      return;
-    }
-
-    if (otp != '1234') {
-      if (mounted) setState(() => _errorText = 'Invalid OTP. Use 1234 for demo.');
+    if (otp.length < 6 || otp.contains(RegExp(r'\D'))) {
+      showTwcToast(context, 'Please enter the 6-digit OTP', isError: true);
       return;
     }
 
     if (mounted) setState(() => _loading = true);
 
     try {
-      // ✅ Save mobile locally first
-      await ref.read(authNotifierProvider.notifier).setMobileOnly(widget.mobile);
-
-      // ✅ Verify mobile with server
-      final result = await ref.read(authNotifierProvider.notifier).verifyMobileOnServer();
-
-      if (!mounted) return;
+      final result = await ref.read(authNotifierProvider.notifier).verifyOtp(widget.mobile, otp);
 
       if (result['ok'] == true) {
-        // ✅ Pass employee info from API to AuthNotifier
-        await ref.read(authNotifierProvider.notifier).completeLogin(
-          employeeId: result['employeeId'],
-          employeeName: result['employeeName'],
-        );
-
-        if (!mounted) return;
-
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
-              (route) => false,
-        );
+        await ref.read(authNotifierProvider.notifier).completeLogin();
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                (route) => false,
+          );
+        }
       } else {
-        final msg = result['message']?.toString() ?? 'Server verification failed';
-        final lower = msg.toLowerCase();
-        final isNetworkLike = lower.contains('failed host lookup') ||
-            lower.contains('socketexception') ||
-            lower.contains('network error') ||
-            lower.contains('timed out') ||
-            lower.contains('cannot reach') ||
-            lower.contains('dns') ||
-            lower.contains('host lookup');
-
-        if (isNetworkLike) {
-          showTwcToast(context, 'Network error — please check connection', isError: true);
-        } else {
-          if (mounted) setState(() => _errorText = msg);
+        final msg = result['message'] ?? 'Invalid or expired OTP';
+        if (mounted) {
+          showTwcToast(context, msg, isError: true);
         }
       }
-    } on DioException catch (e) {
-      String message = 'Network error. Please check your connection.';
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.sendTimeout) {
-        message = 'Request timed out. Please try again.';
-      } else if (e.type == DioExceptionType.unknown) {
-        message = 'Cannot reach the server. Please check your internet or VPN.';
-      } else if (e.response != null) {
-        final d = e.response!.data;
-        if (d is Map && d['message'] != null) message = d['message'].toString();
-      }
-      if (!mounted) return;
-      showTwcToast(context, message, isError: true);
+
     } catch (e) {
-      if (!mounted) return;
-      final msg = 'Error: ${e.toString()}';
-      if (mounted) setState(() => _errorText = msg);
-      showTwcToast(context, msg, isError: true);
+      if (mounted) {
+        showTwcToast(context, e.toString(), isError: true);
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -210,7 +177,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                 // OTP boxes
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: List.generate(4, (i) => _buildOtpBox(i)),
+                  children: List.generate(6, (i) => _buildOtpBox(i)),
                 ),
 
                 if (_errorText != null) ...[

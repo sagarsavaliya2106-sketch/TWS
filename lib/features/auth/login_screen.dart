@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:untitled/widgets/twc_toast.dart';
 
 import '../../theme/colors.dart';
 import '../../theme/text_styles.dart';
@@ -31,27 +32,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _onSendOtp() async {
-    // Validate only; do not call backend here.
     final mobile = _mobileCtrl.text.trim();
     ref.read(loginErrorProvider.notifier).state = null;
 
     if (!isValidMobile(mobile)) {
-      ref.read(loginErrorProvider.notifier).state = 'Please enter a valid 10-digit mobile number';
+      showTwcToast(context, 'Please enter a valid 10-digit mobile number', isError: true);
       return;
     }
 
-    // show loading briefly if you want (not necessary since no network)
     ref.read(loginLoadingProvider.notifier).state = true;
 
-    // save mobile locally via provider (no API call)
-    await ref.read(authNotifierProvider.notifier).setMobileOnly(mobile);
+    final result = await ref.read(authNotifierProvider.notifier).sendOtp(mobile);
 
-    // hide loading
     ref.read(loginLoadingProvider.notifier).state = false;
 
-    // navigate to OTP screen
-    if (!mounted) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => OtpScreen(mobile: mobile)));
+    if (result['ok'] == true) {
+      await ref.read(authNotifierProvider.notifier).setMobileOnly(mobile);
+      if (!mounted) return;
+      Navigator.push(context, MaterialPageRoute(builder: (_) => OtpScreen(mobile: mobile)));
+    } else {
+      final msg = result['message'] ?? 'Failed to send OTP';
+      showTwcToast(context, msg, isError: true);
+    }
   }
 
   @override

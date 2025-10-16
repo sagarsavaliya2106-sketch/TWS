@@ -41,79 +41,66 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final ApiService api;
   AuthNotifier(this.api) : super(AuthState());
 
-  /// Set mobile locally (Login screen uses this without hitting server)
   Future<void> setMobileOnly(String mobile) async {
     state = state.copyWith(mobile: mobile, loggedIn: false);
     final sp = await SharedPreferences.getInstance();
     await sp.setString('mobile_temp', mobile);
   }
 
-  /// Verify mobile using TWC driver API
-  /// Returns a map {ok:bool, message:String?, data:Map?}
-  Future<Map<String, dynamic>> verifyMobileOnServer() async {
-    final mobile = state.mobile;
-    if (mobile == null) return {'ok': false, 'message': 'No mobile provided'};
-
+  /// Step 1: Send OTP
+  Future<Map<String, dynamic>> sendOtp(String mobile) async {
     try {
-      final resp = await api.driverLogin(mobile);
+      final resp = await api.sendOtp(mobile);
       final data = resp.data;
-
-      if (data is Map<String, dynamic>) {
-        final status = data['status']?.toString();
-        if (status == 'success') {
-          final empId = data['employee_id']?.toString();
-          final empName = data['employee_name']?.toString();
-          return {'ok': true, 'employeeId': empId, 'employeeName': empName};
-        } else {
-          return {'ok': false, 'message': data['message'] ?? 'Login failed'};
-        }
-      } else {
-        return {'ok': false, 'message': 'Unexpected server response'};
+      if (data is Map && data['result'] is Map) {
+        final result = data['result'] as Map;
+        final status = result['status']?.toString();
+        final message = result['message']?.toString();
+        return {'ok': status == 'success', 'message': message};
       }
+      return {'ok': false, 'message': 'Unexpected server response'};
     } catch (e) {
       return {'ok': false, 'message': e.toString()};
     }
   }
 
-  /// Mark login complete and persist mobile
-  Future<void> completeLogin({String? employeeId, String? employeeName}) async {
-    state = state.copyWith(
-      loggedIn: true,
-      employeeId: employeeId,
-      employeeName: employeeName,
-    );
+  /// Step 2: Verify OTP
+  Future<Map<String, dynamic>> verifyOtp(String mobile, String otp) async {
+    try {
+      final resp = await api.verifyOtp(mobile, otp);
+      final data = resp.data;
+      if (data is Map && data['result'] is Map) {
+        final result = data['result'] as Map;
+        final status = result['status']?.toString();
+        final message = result['message']?.toString();
+        return {'ok': status == 'success', 'message': message};
+      }
+      return {'ok': false, 'message': 'Unexpected server response'};
+    } catch (e) {
+      return {'ok': false, 'message': e.toString()};
+    }
+  }
 
+  Future<void> completeLogin({String? employeeId, String? employeeName}) async {
+    state = state.copyWith(loggedIn: true);
     final sp = await SharedPreferences.getInstance();
     if (state.mobile != null) {
       await sp.setString('mobile', state.mobile!);
       await sp.remove('mobile_temp');
     }
-    if (employeeId != null) await sp.setString('employee_id', employeeId);
-    if (employeeName != null) await sp.setString('employee_name', employeeName);
   }
 
-  /// Logout: clear saved mobile and reset state
   Future<void> logout() async {
     final sp = await SharedPreferences.getInstance();
-    await sp.remove('mobile');
-    await sp.remove('mobile_temp');
+    await sp.clear();
     state = AuthState();
   }
 
-  /// Restore saved mobile (called at app start)
   Future<void> restoreFromPrefs() async {
     final sp = await SharedPreferences.getInstance();
     final savedMobile = sp.getString('mobile');
-    final savedId = sp.getString('employee_id');
-    final savedName = sp.getString('employee_name');
-
-    if (savedMobile != null && savedMobile.isNotEmpty) {
-      state = state.copyWith(
-        mobile: savedMobile,
-        loggedIn: true,
-        employeeId: savedId,
-        employeeName: savedName,
-      );
+    if (savedMobile != null) {
+      state = state.copyWith(mobile: savedMobile, loggedIn: true);
     }
   }
 }
