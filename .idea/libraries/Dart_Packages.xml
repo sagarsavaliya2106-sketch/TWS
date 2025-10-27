@@ -149,34 +149,6 @@
             </list>
           </value>
         </entry>
-        <entry key="flutter_background_service">
-          <value>
-            <list>
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service-5.1.0/lib" />
-            </list>
-          </value>
-        </entry>
-        <entry key="flutter_background_service_android">
-          <value>
-            <list>
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service_android-6.3.1/lib" />
-            </list>
-          </value>
-        </entry>
-        <entry key="flutter_background_service_ios">
-          <value>
-            <list>
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service_ios-5.0.3/lib" />
-            </list>
-          </value>
-        </entry>
-        <entry key="flutter_background_service_platform_interface">
-          <value>
-            <list>
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service_platform_interface-5.1.2/lib" />
-            </list>
-          </value>
-        </entry>
         <entry key="flutter_hooks">
           <value>
             <list>
@@ -683,10 +655,6 @@
       <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/ffi-2.1.4/lib" />
       <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/file-7.0.1/lib" />
       <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/fixnum-1.1.1/lib" />
-      <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service-5.1.0/lib" />
-      <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service_android-6.3.1/lib" />
-      <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service_ios-5.0.3/lib" />
-      <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_background_service_platform_interface-5.1.2/lib" />
       <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_hooks-0.18.6/lib" />
       <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_lints-5.0.0/lib" />
       <root url="file://$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_riverpod-2.6.1/lib" />

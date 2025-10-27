@@ -20,8 +20,9 @@ class OtpScreen extends ConsumerStatefulWidget {
 }
 
 class _OtpScreenState extends ConsumerState<OtpScreen> {
-  final List<TextEditingController> _controllers = List.generate(6, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+  final List<TextEditingController> _controllers = List.generate(4, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
+
   bool _loading = false;
   String? _errorText;
 
@@ -74,8 +75,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     if (mounted) setState(() => _errorText = null);
 
     final otp = _currentOtp;
-    if (otp.length < 6 || otp.contains(RegExp(r'\D'))) {
-      showTwcToast(context, 'Please enter the 6-digit OTP', isError: true);
+    if (otp.length < 4 || otp.contains(RegExp(r'\D'))) {
+      showTwcToast(context, 'Please enter the 4-digit OTP', isError: true);
       return;
     }
 
@@ -179,7 +180,7 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
                 // OTP boxes
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: List.generate(6, (i) => _buildOtpBox(i)),
+                  children: List.generate(4, (i) => _buildOtpBox(i)),
                 ),
 
                 if (_errorText != null) ...[
