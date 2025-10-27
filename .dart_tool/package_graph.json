@@ -5,7 +5,7 @@
   "packages": [
     {
       "name": "untitled",
-      "version": "6.0.0+6",
+      "version": "7.0.0+7",
       "dependencies": [
         "battery_plus",
         "connectivity_plus",
