@@ -38,35 +38,37 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              value: currentInterval,
-              items: const [
-                DropdownMenuItem(value: 10, child: Text('10 seconds')),
-                DropdownMenuItem(value: 15, child: Text('15 seconds (Default)')),
-                DropdownMenuItem(value: 20, child: Text('20 seconds')),
-                DropdownMenuItem(value: 30, child: Text('30 seconds')),
-              ],
-              onChanged: (v) async {
-                if (v == null) return;
-                ref.read(gpsIntervalProvider.notifier).state = v;
-                showTwcToast(context, 'GPS interval updated to $v seconds');
-              },
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Data collection every',
+                    style: TextStyle(fontSize: 16),
+                  ),
+                  Text(
+                    '$currentInterval seconds',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'The app will now collect GPS data every $currentInterval seconds.',
-              style: const TextStyle(fontSize: 14, color: Colors.black54),
+              'This value is fixed by the system. Drivers cannot change it.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey,
+              ),
             ),
-            const SizedBox(height: 28),
 
             // 🔹 Section 1 — Tracking Logs
             Row(

@@ -22,4 +22,4 @@ final checkInOutLogsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
 });
 
 /// Controls how frequently GPS is collected (in seconds)
-final gpsIntervalProvider = StateProvider<int>((ref) => 15);
+final gpsIntervalProvider = StateProvider<int>((ref) => 10);
