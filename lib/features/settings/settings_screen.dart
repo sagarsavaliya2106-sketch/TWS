@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../service/providers/settings_provider.dart';
-import '../../widgets/twc_toast.dart';
 import '../../theme/colors.dart';
 
 class SettingsScreen extends ConsumerWidget {
