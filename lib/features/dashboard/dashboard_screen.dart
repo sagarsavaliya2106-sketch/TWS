@@ -81,7 +81,112 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     LocationPermission permission = await Geolocator.checkPermission();
 
     if (permission == LocationPermission.denied) {
+      // 🔔 Show prominent disclosure BEFORE system permission dialog (Play requirement)
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeenDisclosure =
+          prefs.getBool('location_disclosure_shown') ?? false;
+
+      if (!hasSeenDisclosure) {
+        if (!mounted) return;
+        final accepted = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Location tracking in the background'),
+            content: const SingleChildScrollView(
+              child: Text(
+                'This app collects your location even when the app is in the '
+                    'background or the screen is off, but only while you are '
+                    'checked in for duty.\n\n'
+                    'Your location is used so the transport/operations team can '
+                    'see your live position, verify routes and stops, and generate '
+                    'trip and attendance reports. Your data is sent securely to '
+                    'your company and is not used for advertising.\n\n'
+                    'You can stop tracking at any time by checking out / logging '
+                    'out or by turning off location permission in system settings.',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('I agree'),
+              ),
+            ],
+          ),
+        ) ??
+            false;
+
+        if (!accepted) {
+          // User did NOT consent → stop here
+          setState(() => _isLoading = false);
+          return;
+        }
+
+        await prefs.setBool('location_disclosure_shown', true);
+      }
+
+      // 👉 Only AFTER user has seen & accepted disclosure, show system permission dialog
       permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      // ❗ Permission denied again — show dialog
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Location Permission Required'),
+          content: const Text(
+              'Location access is required to check in. Please enable location permission in settings.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Geolocator.openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      // 🚫 Permanently denied — direct to app settings
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Permission Permanently Denied'),
+          content: const Text(
+              'You have permanently denied location permission. Please enable it manually from settings.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Geolocator.openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+      setState(() => _isLoading = false);
+      return;
     }
 
     if (permission == LocationPermission.denied) {
