@@ -241,7 +241,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
 
       final payload = pending.map<Map<String, dynamic>>((row) {
         return {
-          'driver_id': row['employee_id'],
+          'driver_id': row['driver_id'],
           'device_id': row['device_id'],
           'timestamp': row['timestamp'],
           'latitude': row['latitude'],

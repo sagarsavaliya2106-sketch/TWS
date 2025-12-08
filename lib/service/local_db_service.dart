@@ -17,7 +17,7 @@ class LocalDbService {
         await db.execute('''
           CREATE TABLE location_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_id TEXT,
+            driver_id TEXT,
             device_id TEXT,
             timestamp TEXT,
             latitude REAL,
@@ -55,7 +55,7 @@ class LocalDbService {
     final db = await _ensureDb();
 
     return await db.insert('location_records', {
-      'employee_id': json['driver_id'] ?? json['employee_id'],
+      'driver_id': json['driver_id'],
       'device_id': json['device_id'],
       'timestamp': json['timestamp'],
       'latitude': json['latitude'],
