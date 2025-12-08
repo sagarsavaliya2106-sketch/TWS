@@ -21,7 +21,7 @@ class LocationRecord {
     return {
       'driver_id': driverId,
       'device_id': deviceId,
-      'timestamp': timestamp.toUtc().toIso8601String(),
+      'timestamp': timestamp.toIso8601String(),
       'latitude': latitude,
       'longitude': longitude,
       'accuracy': accuracy,

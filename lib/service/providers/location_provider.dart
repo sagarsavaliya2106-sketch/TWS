@@ -190,7 +190,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       final record = LocationRecord(
         driverId: driverId,
         deviceId: deviceId,
-        timestamp: now.toUtc(),
+        timestamp: now,
         latitude: pos.latitude,
         longitude: pos.longitude,
         accuracy: pos.accuracy,
