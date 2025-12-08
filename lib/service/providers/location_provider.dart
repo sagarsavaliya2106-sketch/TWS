@@ -5,13 +5,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:untitled/features/location/location_record.dart';
 import 'package:untitled/service/local_db_service.dart';
-import 'auth_provider.dart';
-import 'settings_provider.dart';
+import 'auth_provider.dart';       // for apiServiceProvider
+import 'settings_provider.dart';  // for gpsIntervalProvider
 
 enum SyncStatus {
   idle,      // nothing pending
-  syncing,   // currently sending batch or retrying
-  offline,   // storing locally because no network
+  syncing,   // currently sending batch
+  offline,   // last sync failed (pending in DB)
 }
 
 final syncStatusProvider = StateProvider<SyncStatus>((ref) => SyncStatus.idle);
@@ -31,15 +31,13 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   DateTime? _stationarySince;
   LocationAccuracy _currentAccuracy = LocationAccuracy.high;
 
-  final List<LocationRecord> _batchBuffer = [];
-
   LocationNotifier(this.ref) : super(null) {
-    // If interval ever changes in settings (even though it's fixed now),
-    // restart tracking with the same driver/device.
+    // If interval ever changes (even if fixed now), restart tracking.
     ref.listen<int>(gpsIntervalProvider, (previous, next) async {
       if (_positionSub != null) {
         debugPrint(
-            "⚙️ Interval changed from $previous → $next seconds, restarting tracking...");
+          "⚙️ Interval changed from $previous → $next seconds, restarting tracking...",
+        );
         final current = state;
         if (current != null) {
           await startLocationStream(
@@ -57,7 +55,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   }) async {
     await stopLocationStream();
 
-    final interval = ref.read(gpsIntervalProvider); // should be 10
+    final interval = ref.read(gpsIntervalProvider); // fixed 10s
     final battery = Battery();
 
     LocationSettings locationSettings;
@@ -134,8 +132,9 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         Position? externalPosition,
       }) async {
     try {
-      // ⏱️ Enforce MINIMUM 10 seconds between saved records
       final now = DateTime.now();
+
+      // ⏱️ Enforce MINIMUM 10 seconds between saved records
       if (_lastPosAt != null) {
         final diff = now.difference(_lastPosAt!).inSeconds;
         if (diff < 10) {
@@ -154,7 +153,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         _currentAccuracy = LocationAccuracy.high;
       }
 
-      // Use stream position if provided, otherwise get one shot
+      // Use stream position if provided, otherwise get one shot (fallback)
       final pos = externalPosition ??
           await Geolocator.getCurrentPosition(
             locationSettings: LocationSettings(
@@ -191,32 +190,27 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
       final record = LocationRecord(
         driverId: driverId,
         deviceId: deviceId,
-        timestamp: DateTime.now().toUtc(),
+        timestamp: now.toUtc(),
         latitude: pos.latitude,
         longitude: pos.longitude,
         accuracy: pos.accuracy,
         batteryLevel: batteryLevel.toDouble(),
       );
 
-      // ✅ Update provider state
+      // ✅ Update provider state (UI shows latest)
       state = record;
 
-      // ✅ Add to batch
-      _batchBuffer.add(record);
-      debugPrint(
-          "📍 Added to batch (${_batchBuffer.length}): ${record.toJson()}");
+      // ✅ ALWAYS store to local DB as pending
+      await LocalDbService.insertRecord(record.toJson(), status: 'pending');
+      debugPrint("📍 Stored to local DB: ${record.toJson()}");
 
-      // ✅ Decide when to send
-      // We want: minimum 3 records per request.
-      const recordsThreshold = 3;
-      final shouldSend = _batchBuffer.length >= recordsThreshold;
+      // 🔄 Tell Settings screen to reload local DB list
+      ref.invalidate(localDbLogsProvider);
 
-      if (shouldSend) {
-        debugPrint("🚀 Triggering send, batch has ${_batchBuffer.length} points");
-        await _sendBatchToServer();
-      }
+      // ✅ Try to sync any pending records
+      await _trySyncPending();
 
-      // 🧭 Save last position & time for next checks
+      // 🧭 Save last position & time for next check
       _lastPos = pos;
       _lastPosAt = now;
     } catch (e) {
@@ -224,58 +218,55 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
     }
   }
 
-  Future<void> _sendBatchToServer() async {
-    if (_batchBuffer.isEmpty) return;
+  /// Read all pending records from SQLite and send them when:
+  /// - we have AT LEAST 3 pending records
+  /// - we are not already syncing
+  Future<void> _trySyncPending() async {
+    final currentStatus = ref.read(syncStatusProvider);
+    if (currentStatus == SyncStatus.syncing) {
+      return; // avoid parallel syncs
+    }
+
+    final pending = await LocalDbService.getPendingRecords();
+    if (pending.length < 3) {
+      debugPrint(
+          "⌛ Pending records below threshold (have ${pending.length}, need >= 3)");
+      return;
+    }
 
     ref.read(syncStatusProvider.notifier).state = SyncStatus.syncing;
 
     try {
-      // 1️⃣ Load previously unsent records from SQLite
-      final offline = await LocalDbService.getAllRecords();
-
-      // 2️⃣ Convert current in-memory batch to JSON
-      final current = _batchBuffer.map((e) => e.toJson()).toList();
-
-      // 3️⃣ Combine: old (offline) + new (current)
-      final payload = <Map<String, dynamic>>[
-        ...offline,
-        ...current,
-      ];
-
-      if (payload.isEmpty) {
-        debugPrint("ℹ️ Nothing to send (payload empty)");
-        ref.read(syncStatusProvider.notifier).state = SyncStatus.idle;
-        return;
-      }
-
       final api = ref.read(apiServiceProvider);
-      debugPrint(
-        "📦 Sending ${payload.length} points "
-            "(offline=${offline.length}, current=${current.length})...",
-      );
 
-      // 4️⃣ Single call to /twc_driver/tracking
+      final payload = pending.map<Map<String, dynamic>>((row) {
+        return {
+          'driver_id': row['employee_id'],
+          'device_id': row['device_id'],
+          'timestamp': row['timestamp'],
+          'latitude': row['latitude'],
+          'longitude': row['longitude'],
+          'accuracy': row['accuracy'],
+          'battery_level': row['battery_level'],
+        };
+      }).toList();
+
+      debugPrint("📦 Syncing ${pending.length} pending records to server...");
       await api.sendLocationBatch(payload);
-      debugPrint("✅ Batch sent successfully");
+      debugPrint("✅ Synced ${pending.length} records");
 
-      // 5️⃣ On success: clear everything and start fresh
-      _batchBuffer.clear();
-      await LocalDbService.clearAll();
-      await LocalDbService.deleteOldRecords();
+      final ids = pending
+          .map<int>((row) => row['id'] as int)
+          .toList();
+      await LocalDbService.markRecordsSent(ids);
+
+      // 🔄 Refresh local DB list so statuses change from PENDING → SENT
+      ref.invalidate(localDbLogsProvider);
 
       ref.read(syncStatusProvider.notifier).state = SyncStatus.idle;
     } catch (e) {
-      debugPrint(
-        "⚠️ Network failed — storing ${_batchBuffer.length} current points locally: $e",
-      );
+      debugPrint("⚠️ Sync failed, will retry later: $e");
       ref.read(syncStatusProvider.notifier).state = SyncStatus.offline;
-
-      // 6️⃣ On failure: keep old offline data, just add CURRENT batch
-      for (final record in _batchBuffer) {
-        await LocalDbService.insertRecord(record.toJson());
-      }
-
-      _batchBuffer.clear();
     }
   }
 
@@ -283,11 +274,8 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
     await _positionSub?.cancel();
     _positionSub = null;
 
-    if (_batchBuffer.isNotEmpty) {
-      debugPrint(
-          "📤 Stopping tracking — sending remaining ${_batchBuffer.length} points...");
-      await _sendBatchToServer();
-    }
+    // Try one more time to sync anything still pending
+    await _trySyncPending();
   }
 
   void clearLocation() {

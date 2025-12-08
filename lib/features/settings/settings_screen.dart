@@ -11,6 +11,7 @@ class SettingsScreen extends ConsumerWidget {
     final currentInterval = ref.watch(gpsIntervalProvider);
     final trackingAsync = ref.watch(trackingLogsProvider);
     final checkInOutAsync = ref.watch(checkInOutLogsProvider);
+    final localDbAsync = ref.watch(localDbLogsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -70,11 +71,14 @@ class SettingsScreen extends ConsumerWidget {
             ),
 
             // 🔹 Section 1 — Tracking Logs
+            const SizedBox(height: 16),
+
+            // 🔹 Section 0 — Local SQLite Records
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  'Latest Tracking Logs',
+                  'Local stored GPS records',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -84,35 +88,55 @@ class SettingsScreen extends ConsumerWidget {
                 IconButton(
                   icon: const Icon(Icons.refresh),
                   color: TWCColors.coffeeDark,
-                  onPressed: () => ref.invalidate(trackingLogsProvider),
+                  onPressed: () => ref.invalidate(localDbLogsProvider),
                 ),
               ],
             ),
             Expanded(
               flex: 1,
-              child: trackingAsync.when(
+              child: localDbAsync.when(
                 data: (list) {
                   if (list.isEmpty) {
-                    return const Center(child: Text('No tracking data'));
+                    return const Center(child: Text('No local records'));
                   }
                   return ListView.separated(
                     itemCount: list.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.black12),
+                    separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: Colors.black12),
                     itemBuilder: (_, i) {
                       final e = list[i];
+                      final status = (e['status'] ?? 'pending') as String;
+                      Color statusColor;
+                      switch (status) {
+                        case 'sent':
+                          statusColor = Colors.green;
+                          break;
+                        case 'pending':
+                        default:
+                          statusColor = Colors.orange;
+                      }
                       return ListTile(
                         title: Text(e['timestamp'] ?? ''),
                         subtitle: Text(
                           'Lat: ${e['latitude']}, Lon: ${e['longitude']}\n'
-                              'Acc: ${e['accuracy']}m, battery_level: ${e['battery_level']}%',
+                              'Acc: ${e['accuracy']}m, Battery: ${e['battery_level']}%',
                           style: const TextStyle(height: 1.3),
+                        ),
+                        trailing: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: statusColor,
+                          ),
                         ),
                         dense: true,
                       );
                     },
                   );
                 },
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () =>
+                const Center(child: CircularProgressIndicator()),
                 error: (err, _) => Center(child: Text('Error: $err')),
               ),
             ),
