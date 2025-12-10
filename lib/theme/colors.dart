@@ -5,4 +5,5 @@ class TWCColors {
   static const coffeeDark = Color(0xFF2D3C4B);
   static const accentBurgundy = Color(0xFF8C203F);
   static const greyText = Color(0xFF6B6B6B);
+  static const coffeeLight = Color(0xFFE7D3BF);
 }

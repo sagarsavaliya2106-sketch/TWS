@@ -26,8 +26,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message,
-            style: const TextStyle(color: Colors.white, fontSize: 15)),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white, fontSize: 15),
+        ),
         backgroundColor: isError ? Colors.redAccent : Colors.green,
         duration: const Duration(seconds: 2),
       ),
@@ -44,6 +46,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return prefs.getBool('isCheckedIn') ?? false;
   }
 
+  // 🔹 NEW: persist duty toggle
+  Future<void> _saveDutyToPrefs(bool dutyOn) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isDutyOn', dutyOn);
+  }
+
+  Future<bool> _restoreDuty() async {
+    final prefs = await SharedPreferences.getInstance();
+    // default = true when checked-in (auto ON like Rapido)
+    return prefs.getBool('isDutyOn') ?? true;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -52,19 +66,29 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   Future<void> _restoreState() async {
     final checkedIn = await _restoreCheckedIn();
+    final dutyOn = await _restoreDuty();
     if (!mounted) return;
 
     final uiNotifier = ref.read(attendanceUiProvider.notifier);
     uiNotifier.forceCheckedIn(checkedIn);
 
-    if (checkedIn) {
+    // 🔹 NEW: restore duty switch
+    final dutyNotifier = ref.read(dutyToggleProvider.notifier);
+    final effectiveDutyOn = checkedIn && dutyOn;
+    dutyNotifier.state = effectiveDutyOn;
+
+    if (checkedIn && effectiveDutyOn) {
       final auth = ref.read(authNotifierProvider);
       final driverId = auth.mobile ?? 'unknown';
       await ref.read(locationProvider.notifier).startLocationStream(
         driverId: driverId,
         deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
       );
-      debugPrint('🟢 Restored shift active (tracking resumed)');
+      debugPrint('🟢 Restored shift active with duty ON (tracking resumed)');
+    } else {
+      debugPrint(
+        '⚪ Restored state (checkedIn=$checkedIn, dutyOn=$effectiveDutyOn)',
+      );
     }
   }
 
@@ -189,62 +213,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       return;
     }
 
-    if (permission == LocationPermission.denied) {
-      // ❗ Permission denied again — show dialog
-      if (!mounted) return;
-      await showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Location Permission Required'),
-          content: const Text(
-              'Location access is required to check in. Please enable location permission in settings.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Geolocator.openAppSettings();
-              },
-              child: const Text('Open Settings'),
-            ),
-          ],
-        ),
-      );
-      setState(() => _isLoading = false);
-      return;
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      // 🚫 Permanently denied — direct to app settings
-      if (!mounted) return;
-      await showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Permission Permanently Denied'),
-          content: const Text(
-              'You have permanently denied location permission. Please enable it manually from settings.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Geolocator.openAppSettings();
-              },
-              child: const Text('Open Settings'),
-            ),
-          ],
-        ),
-      );
-      setState(() => _isLoading = false);
-      return;
-    }
-
     // ✅ STEP 2: Get current position safely
     Position? pos;
     try {
@@ -273,6 +241,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       uiNotifier.forceCheckedIn(true);
       await _saveAttendanceToPrefs(true);
 
+      // 🔹 NEW: when check-in success, duty auto ON
+      ref.read(dutyToggleProvider.notifier).state = true;
+      await _saveDutyToPrefs(true);
+
       await ref.read(locationProvider.notifier).startLocationStream(
         driverId: mobile,
         deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
@@ -289,6 +261,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         _showToast(msg.isNotEmpty ? msg : 'Already checked in');
         uiNotifier.forceCheckedIn(true);
         await _saveAttendanceToPrefs(true);
+
+        // 🔹 NEW: already logged in → duty ON as well
+        ref.read(dutyToggleProvider.notifier).state = true;
+        await _saveDutyToPrefs(true);
 
         await ref.read(locationProvider.notifier).startLocationStream(
           driverId: mobile,
@@ -332,6 +308,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('checked_in');
       await prefs.remove('last_toggled_at');
+      await prefs.remove('isCheckedIn'); // 🔹 NEW
+      await prefs.remove('isDutyOn');    // 🔹 NEW
 
       if (!context.mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
@@ -347,6 +325,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final auth = ref.watch(authNotifierProvider);
     final pos = ref.watch(locationProvider);
     final syncStatus = ref.watch(syncStatusProvider);
+    final dutyOn = ref.watch(dutyToggleProvider); // 🔹 NEW
 
     return Scaffold(
       backgroundColor: TWCColors.latteBg,
@@ -405,6 +384,65 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
+
+                            // 🔹 NEW: Rapido-style duty toggle, only when checked in
+                            if (ui.checkedIn) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    dutyOn ? 'On Duty' : 'Off Duty',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Switch(
+                                    value: dutyOn,
+                                    onChanged: (value) async {
+                                      final auth =
+                                      ref.read(authNotifierProvider);
+                                      final driverId =
+                                          auth.mobile ?? 'unknown';
+
+                                      ref
+                                          .read(
+                                          dutyToggleProvider.notifier)
+                                          .state = value;
+                                      await _saveDutyToPrefs(value);
+
+                                      if (value) {
+                                        // turned ON → start tracking (only if still checked in)
+                                        if (ref
+                                            .read(attendanceUiProvider)
+                                            .checkedIn) {
+                                          await ref
+                                              .read(locationProvider.notifier)
+                                              .startLocationStream(
+                                            driverId: driverId,
+                                            deviceId:
+                                            'android-${DateTime.now().millisecondsSinceEpoch}',
+                                          );
+                                          debugPrint(
+                                              '🟢 Duty switch ON – tracking started');
+                                        }
+                                      } else {
+                                        // turned OFF → stop tracking
+                                        await ref
+                                            .read(locationProvider.notifier)
+                                            .stopLocationStream();
+                                        debugPrint(
+                                            '⭕ Duty switch OFF – tracking stopped');
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ],
+
                             const SizedBox(height: 6),
                             Text(
                               'Last: ${DateFormat('hh:mm:ss a, dd MMM yyyy').format(DateTime.now())}',
@@ -418,7 +456,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               Text(
                                 'Location: ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
                                 style: const TextStyle(
-                                    fontSize: 13, color: Colors.black54),
+                                  fontSize: 13,
+                                  color: Colors.black54,
+                                ),
                               ),
                               const SizedBox(height: 4),
                               _buildSyncBadge(syncStatus),
@@ -479,9 +519,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ? []
           : [
         BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            offset: const Offset(6, 6),
-            blurRadius: 12),
+          color: Colors.black.withValues(alpha: 0.3),
+          offset: const Offset(6, 6),
+          blurRadius: 12,
+        ),
         BoxShadow(
             color: Colors.white.withValues(alpha: 0.2),
             offset: const Offset(-6, -6),
@@ -494,13 +535,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       borderRadius: BorderRadius.circular(30),
       boxShadow: [
         BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            offset: const Offset(-4, -4),
-            blurRadius: 8),
+          color: Colors.black.withValues(alpha: 0.2),
+          offset: const Offset(-4, -4),
+          blurRadius: 8,
+        ),
         BoxShadow(
-            color: Colors.white.withValues(alpha: 0.8),
-            offset: const Offset(4, 4),
-            blurRadius: 8),
+          color: Colors.white.withValues(alpha: 0.8),
+          offset: const Offset(4, 4),
+          blurRadius: 8,
+        ),
       ],
     );
 
@@ -526,7 +569,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ? 'Please wait (${ui.countdown}s)...'
                   : 'Checking in...',
               style: const TextStyle(
-                  fontSize: 18, color: TWCColors.coffeeDark),
+                fontSize: 18,
+                color: TWCColors.coffeeDark,
+              ),
             ),
           ],
         ),
@@ -575,14 +620,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget _buildSyncBadge(SyncStatus status) {
     switch (status) {
       case SyncStatus.syncing:
-        return const Text('⏳ Syncing...',
-            style: TextStyle(color: Colors.orange, fontSize: 13));
+        return const Text(
+          '⏳ Syncing...',
+          style: TextStyle(color: Colors.orange, fontSize: 13),
+        );
       case SyncStatus.offline:
-        return const Text('⚠️ Offline — saving locally',
-            style: TextStyle(color: Colors.redAccent, fontSize: 13));
+        return const Text(
+          '⚠️ Offline — saving locally',
+          style: TextStyle(color: Colors.redAccent, fontSize: 13),
+        );
       case SyncStatus.idle:
-        return const Text('✅ All data synced',
-            style: TextStyle(color: Colors.green, fontSize: 13));
+        return const Text(
+          '✅ All data synced',
+          style: TextStyle(color: Colors.green, fontSize: 13),
+        );
     }
   }
 }

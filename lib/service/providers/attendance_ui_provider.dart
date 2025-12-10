@@ -64,3 +64,5 @@ final attendanceUiProvider =
 StateNotifierProvider<AttendanceUiNotifier, AttendanceUiState>(
       (ref) => AttendanceUiNotifier(),
 );
+
+final dutyToggleProvider = StateProvider<bool>((ref) => false);
