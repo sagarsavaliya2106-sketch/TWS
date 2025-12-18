@@ -245,6 +245,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       ref.read(dutyToggleProvider.notifier).state = true;
       await _saveDutyToPrefs(true);
 
+      // 🔹 NEW: also tell backend "ON DUTY" (best effort, don't block check-in UX)
+      try {
+        final dutyRes = await api.driverDuty(mobileNo: mobile, action: 'on');
+        final msg = (dutyRes['message'] ?? '').toString();
+        if (msg.isNotEmpty) {
+          _showToast(msg);
+        }
+      } catch (e) {
+        debugPrint('⚠️ Duty ON failed (ignored): $e');
+      }
       await ref.read(locationProvider.notifier).startLocationStream(
         driverId: mobile,
         deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
@@ -266,6 +276,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ref.read(dutyToggleProvider.notifier).state = true;
         await _saveDutyToPrefs(true);
 
+        // 🔹 NEW: also tell backend "ON DUTY" (best effort, don't block check-in UX)
+        try {
+          final dutyRes = await api.driverDuty(mobileNo: mobile, action: 'on');
+          final msg = (dutyRes['message'] ?? '').toString();
+          if (msg.isNotEmpty) {
+            _showToast(msg);
+          }
+        } catch (e) {
+          debugPrint('⚠️ Duty ON failed (ignored): $e');
+        }
         await ref.read(locationProvider.notifier).startLocationStream(
           driverId: mobile,
           deviceId: 'android-${DateTime.now().millisecondsSinceEpoch}',
@@ -326,6 +346,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final pos = ref.watch(locationProvider);
     final syncStatus = ref.watch(syncStatusProvider);
     final dutyOn = ref.watch(dutyToggleProvider); // 🔹 NEW
+    final dutyBusy = ref.watch(dutyApiLoadingProvider);
 
     return Scaffold(
       backgroundColor: TWCColors.latteBg,
@@ -402,40 +423,103 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                   const SizedBox(width: 8),
                                   Switch(
                                     value: dutyOn,
-                                    onChanged: (value) async {
-                                      final auth =
-                                      ref.read(authNotifierProvider);
-                                      final driverId =
-                                          auth.mobile ?? 'unknown';
+                                    onChanged: (!ui.checkedIn || dutyBusy)
+                                        ? null
+                                        : (value) async {
+                                      final prev = dutyOn;
 
+                                      // show busy + disable the switch while calling API
                                       ref
-                                          .read(
-                                          dutyToggleProvider.notifier)
-                                          .state = value;
-                                      await _saveDutyToPrefs(value);
+                                          .read(dutyApiLoadingProvider.notifier)
+                                          .state = true;
 
-                                      if (value) {
-                                        // turned ON → start tracking (only if still checked in)
-                                        if (ref
-                                            .read(attendanceUiProvider)
-                                            .checkedIn) {
+                                      try {
+                                        final auth = ref.read(authNotifierProvider);
+                                        final api = ref.read(apiServiceProvider);
+                                        final mobile = auth.mobile ?? '';
+
+                                        if (mobile.isEmpty) {
+                                          throw Exception('Missing mobile number');
+                                        }
+
+                                        final action = value ? 'on' : 'off';
+                                        final result = await api.driverDuty(
+                                          mobileNo: mobile,
+                                          action: action,
+                                        );
+
+                                        final status =
+                                        (result['status'] ?? '').toString().toLowerCase();
+                                        final message =
+                                        (result['message'] ?? '').toString();
+
+                                        // Treat "already ..." as a successful end state.
+                                        final commit = status == 'success' ||
+                                            message.toLowerCase().contains('already');
+
+                                        if (!commit) {
+                                          ref
+                                              .read(dutyToggleProvider.notifier)
+                                              .state = prev;
+                                          _showToast(
+                                            message.isNotEmpty
+                                                ? message
+                                                : 'Failed to change duty',
+                                            isError: true,
+                                          );
+                                          return;
+                                        }
+
+                                        // ✅ Persist + update UI
+                                        ref
+                                            .read(dutyToggleProvider.notifier)
+                                            .state = value;
+                                        await _saveDutyToPrefs(value);
+
+                                        _showToast(
+                                          message.isNotEmpty
+                                              ? message
+                                              : (value
+                                              ? 'Driver ON DUTY'
+                                              : 'Driver OFF DUTY'),
+                                        );
+
+                                        // ✅ Start/stop tracking based on duty state (only if checked in)
+                                        if (value) {
+                                          if (ui.checkedIn) {
+                                            await ref
+                                                .read(locationProvider.notifier)
+                                                .startLocationStream(
+                                              driverId: mobile,
+                                              deviceId:
+                                              'android-${DateTime.now().millisecondsSinceEpoch}',
+                                            );
+                                          }
+                                        } else {
                                           await ref
                                               .read(locationProvider.notifier)
-                                              .startLocationStream(
-                                            driverId: driverId,
-                                            deviceId:
-                                            'android-${DateTime.now().millisecondsSinceEpoch}',
-                                          );
-                                          debugPrint(
-                                              '🟢 Duty switch ON – tracking started');
+                                              .stopLocationStream();
                                         }
-                                      } else {
-                                        // turned OFF → stop tracking
-                                        await ref
-                                            .read(locationProvider.notifier)
-                                            .stopLocationStream();
-                                        debugPrint(
-                                            '⭕ Duty switch OFF – tracking stopped');
+                                      } on DioException catch (e) {
+                                        ref
+                                            .read(dutyToggleProvider.notifier)
+                                            .state = prev;
+                                        _showToast(
+                                          'Duty API error: ${e.message}',
+                                          isError: true,
+                                        );
+                                      } catch (e) {
+                                        ref
+                                            .read(dutyToggleProvider.notifier)
+                                            .state = prev;
+                                        _showToast(
+                                          'Duty error: $e',
+                                          isError: true,
+                                        );
+                                      } finally {
+                                        ref
+                                            .read(dutyApiLoadingProvider.notifier)
+                                            .state = false;
                                       }
                                     },
                                   ),

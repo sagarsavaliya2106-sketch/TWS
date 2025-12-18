@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:untitled/service/local_db_service.dart';
 import 'auth_provider.dart';
 
@@ -28,3 +29,8 @@ FutureProvider<List<Map<String, dynamic>>>((ref) async {
 
 /// Fixed GPS interval (seconds)
 final gpsIntervalProvider = StateProvider<int>((ref) => 10);
+/// App version from pubspec (e.g. 12.0.0+12)
+final appVersionProvider = FutureProvider<String>((ref) async {
+  final info = await PackageInfo.fromPlatform();
+  return '${info.version}+${info.buildNumber}';
+});

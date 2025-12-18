@@ -12,6 +12,7 @@ class SettingsScreen extends ConsumerWidget {
     final trackingAsync = ref.watch(trackingLogsProvider);
     final checkInOutAsync = ref.watch(checkInOutLogsProvider);
     final localDbAsync = ref.watch(localDbLogsProvider);
+    final versionAsync = ref.watch(appVersionProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -198,6 +199,24 @@ class SettingsScreen extends ConsumerWidget {
                 error: (err, _) => Center(child: Text('Error: $err')),
               ),
             ),
+            const SizedBox(height: 12),
+            versionAsync.when(
+              data: (v) => Center(
+                child: Text(
+                  'Version $v',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+              loading: () => const Center(
+                child: SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+
           ],
         ),
       ),

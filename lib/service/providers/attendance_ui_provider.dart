@@ -66,3 +66,6 @@ StateNotifierProvider<AttendanceUiNotifier, AttendanceUiState>(
 );
 
 final dutyToggleProvider = StateProvider<bool>((ref) => false);
+
+// true while /duty API call is in-flight (disable the switch)
+final dutyApiLoadingProvider = StateProvider<bool>((ref) => false);

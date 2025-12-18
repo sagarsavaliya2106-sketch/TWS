@@ -64,6 +64,32 @@ class ApiService {
     return await _dio.post('/api/twc_driver/check-in-out', data: data);
   }
 
+
+  /// Toggle driver duty (on/off)
+  /// API: POST /api/twc_driver/duty
+  /// Body: { "mobile_no": "...", "action": "on" | "off" }
+  /// Response (JSON-RPC style): { "result": { "status": "...", "message": "...", ... } }
+  Future<Map<String, dynamic>> driverDuty({
+    required String mobileNo,
+    required String action, // "on" or "off"
+  }) async {
+    final resp = await _dio.post(
+      '/api/twc_driver/duty',
+      data: {
+        'mobile_no': mobileNo,
+        'action': action,
+      },
+    );
+
+    if (resp.statusCode == 200 && resp.data is Map) {
+      final result = (resp.data as Map)['result'];
+      if (result is Map) {
+        return Map<String, dynamic>.from(result as Map);
+      }
+    }
+    throw Exception('Failed to toggle duty');
+  }
+
   Future<Response> sendLocationBatch(List<Map<String, dynamic>> batch) async {
     return await _dio.post('/api/twc_driver/tracking', data: batch);
   }
