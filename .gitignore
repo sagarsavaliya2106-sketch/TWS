@@ -44,3 +44,7 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 build/
+
+# Build outputs
+build/
+android/app/build/
