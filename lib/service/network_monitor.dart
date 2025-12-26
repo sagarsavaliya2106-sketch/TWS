@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:untitled/service/providers/auth_provider.dart';
+import 'package:untitled/service/providers/location_provider.dart';
+import 'package:untitled/service/providers/settings_provider.dart';
 import 'local_db_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -45,17 +47,43 @@ class NetworkMonitor {
 
   /// Sync all locally stored records
   Future<bool> _syncLocalRecords() async {
-    final pending = await LocalDbService.getAllRecords();
+    // ✅ prevent double sync if LocationNotifier is already syncing
+    final currentStatus = ref.read(syncStatusProvider);
+    if (currentStatus == SyncStatus.syncing) return true;
+
+    final pending = await LocalDbService.getPendingRecords();
     if (pending.isEmpty) return true;
 
+    ref.read(syncStatusProvider.notifier).state = SyncStatus.syncing;
+
     final api = ref.read(apiServiceProvider);
+
     try {
-      await api.sendLocationBatch(pending);
-      await LocalDbService.clearAll();
-      await LocalDbService.deleteOldRecords();
-      debugPrint("✅ Synced ${pending.length} offline records");
+      final payload = pending.map<Map<String, dynamic>>((row) {
+        return {
+          'driver_id': row['driver_id'],
+          'device_id': row['device_id'],
+          'timestamp': row['timestamp'],
+          'latitude': row['latitude'],
+          'longitude': row['longitude'],
+          'accuracy': row['accuracy'],
+          'battery_level': row['battery_level'],
+        };
+      }).toList();
+
+      await api.sendLocationBatch(payload);
+
+      final ids = pending.map<int>((e) => e['id'] as int).toList();
+      await LocalDbService.markRecordsSent(ids);
+
+      // ✅ refresh UI status
+      ref.invalidate(localDbLogsProvider);
+
+      ref.read(syncStatusProvider.notifier).state = SyncStatus.idle;
+      debugPrint("✅ Synced ${pending.length} offline records (kept in DB as SENT)");
       return true;
     } catch (e) {
+      ref.read(syncStatusProvider.notifier).state = SyncStatus.offline;
       debugPrint("⚠️ Sync failed: $e");
       return false;
     }

@@ -124,4 +124,15 @@ class LocalDbService {
     );
     return count;
   }
+
+  static Future<Map<String, dynamic>?> getLatestRecord() async {
+    final db = await _ensureDb();
+    final rows = await db.query(
+      'location_records',
+      orderBy: 'timestamp DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first;
+  }
 }

@@ -84,7 +84,7 @@ class ApiService {
     if (resp.statusCode == 200 && resp.data is Map) {
       final result = (resp.data as Map)['result'];
       if (result is Map) {
-        return Map<String, dynamic>.from(result as Map);
+        return Map<String, dynamic>.from(result);
       }
     }
     throw Exception('Failed to toggle duty');

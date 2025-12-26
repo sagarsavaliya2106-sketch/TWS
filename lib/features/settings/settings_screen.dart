@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+
 import '../../service/providers/settings_provider.dart';
+import '../../service/tracking_health.dart';
 import '../../theme/colors.dart';
+import 'local_gps_records_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -9,20 +13,19 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentInterval = ref.watch(gpsIntervalProvider);
-    final trackingAsync = ref.watch(trackingLogsProvider);
-    final checkInOutAsync = ref.watch(checkInOutLogsProvider);
     final localDbAsync = ref.watch(localDbLogsProvider);
+    final checkInOutAsync = ref.watch(checkInOutLogsProvider);
     final versionAsync = ref.watch(appVersionProvider);
+
+    // ✅ watch health here (NOT inside onPressed)
+    final healthAsync = ref.watch(trackingHealthProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'App Settings',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: const Text('App Settings', style: TextStyle(color: Colors.white)),
         backgroundColor: TWCColors.coffeeDark,
         centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white), // ✅ makes back arrow white
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       backgroundColor: TWCColors.latteBg,
       body: Padding(
@@ -48,33 +51,81 @@ class SettingsScreen extends ConsumerWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Data collection every',
-                    style: TextStyle(fontSize: 16),
-                  ),
+                  const Text('Data collection every', style: TextStyle(fontSize: 16)),
                   Text(
                     '$currentInterval seconds',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'This value is fixed by the system. Drivers cannot change it.',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
-              ),
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
 
-            // 🔹 Section 1 — Tracking Logs
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
 
-            // 🔹 Section 0 — Local SQLite Records
+            // ✅ Tracking stopped banner (shows automatically)
+            healthAsync.when(
+              data: (h) {
+                if (h.isOk) return const SizedBox.shrink();
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          h.message,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+                          if (!serviceEnabled) {
+                            await Geolocator.openLocationSettings();
+                            ref.invalidate(trackingHealthProvider);
+                            return;
+                          }
+
+                          final perm = await Geolocator.checkPermission();
+                          if (perm == LocationPermission.denied) {
+                            await Geolocator.requestPermission();
+                            ref.invalidate(trackingHealthProvider);
+                            return;
+                          }
+                          if (perm == LocationPermission.deniedForever) {
+                            await Geolocator.openAppSettings();
+                            ref.invalidate(trackingHealthProvider);
+                            return;
+                          }
+
+                          // Tracking stalled case: refresh health + records
+                          ref.invalidate(localDbLogsProvider);
+                          ref.invalidate(trackingHealthProvider);
+                        },
+                        child: const Text('Restart'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+
+            // 🔹 Local SQLite Records header
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -86,36 +137,47 @@ class SettingsScreen extends ConsumerWidget {
                     color: TWCColors.coffeeDark,
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  color: TWCColors.coffeeDark,
-                  onPressed: () => ref.invalidate(localDbLogsProvider),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      color: TWCColors.coffeeDark,
+                      onPressed: () => ref.invalidate(localDbLogsProvider),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const LocalGpsRecordsScreen()),
+                        );
+                      },
+                      child: const Text('View All'),
+                    ),
+                  ],
                 ),
               ],
             ),
-            Expanded(
-              flex: 1,
+
+            // ✅ Small preview list (5 rows)
+            SizedBox(
+              height: 240,
               child: localDbAsync.when(
                 data: (list) {
                   if (list.isEmpty) {
                     return const Center(child: Text('No local records'));
                   }
+
+                  final preview = list.take(5).toList();
                   return ListView.separated(
-                    itemCount: list.length,
+                    itemCount: preview.length,
                     separatorBuilder: (_, __) =>
                     const Divider(height: 1, color: Colors.black12),
                     itemBuilder: (_, i) {
-                      final e = list[i];
+                      final e = preview[i];
                       final status = (e['status'] ?? 'pending') as String;
-                      Color statusColor;
-                      switch (status) {
-                        case 'sent':
-                          statusColor = Colors.green;
-                          break;
-                        case 'pending':
-                        default:
-                          statusColor = Colors.orange;
-                      }
+                      final statusColor =
+                      status == 'sent' ? Colors.green : Colors.orange;
+
                       return ListTile(
                         title: Text(e['timestamp'] ?? ''),
                         subtitle: Text(
@@ -136,14 +198,14 @@ class SettingsScreen extends ConsumerWidget {
                     },
                   );
                 },
-                loading: () =>
-                const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (err, _) => Center(child: Text('Error: $err')),
               ),
             ),
-            const SizedBox(height: 20),
 
-            // 🔹 Section 2 — Check-In / Check-Out Logs
+            const SizedBox(height: 16),
+
+            // 🔹 Check-In / Check-Out Logs
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -163,7 +225,6 @@ class SettingsScreen extends ConsumerWidget {
               ],
             ),
             Expanded(
-              flex: 1,
               child: checkInOutAsync.when(
                 data: (list) {
                   if (list.isEmpty) {
@@ -171,16 +232,20 @@ class SettingsScreen extends ConsumerWidget {
                   }
                   return ListView.separated(
                     itemCount: list.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.black12),
+                    separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: Colors.black12),
                     itemBuilder: (_, i) {
                       final e = list[i];
                       final wh = e['warehouse_name'] ?? e['store_name'] ?? '-';
                       final locType = e['location_type'] ?? '—';
                       final status = e['trip_status'] ?? '';
                       final time = e['timestamp'] ?? '';
+
                       return ListTile(
                         leading: Icon(
-                          status == 'in_progress' ? Icons.play_arrow_rounded : Icons.stop_circle_outlined,
+                          status == 'in_progress'
+                              ? Icons.play_arrow_rounded
+                              : Icons.stop_circle_outlined,
                           color: status == 'in_progress'
                               ? Colors.green
                               : Colors.redAccent,
@@ -199,13 +264,12 @@ class SettingsScreen extends ConsumerWidget {
                 error: (err, _) => Center(child: Text('Error: $err')),
               ),
             ),
-            const SizedBox(height: 12),
+
+            const SizedBox(height: 10),
             versionAsync.when(
               data: (v) => Center(
-                child: Text(
-                  'Version $v',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
+                child: Text('Version $v',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
               ),
               loading: () => const Center(
                 child: SizedBox(
@@ -216,7 +280,6 @@ class SettingsScreen extends ConsumerWidget {
               ),
               error: (_, __) => const SizedBox.shrink(),
             ),
-
           ],
         ),
       ),

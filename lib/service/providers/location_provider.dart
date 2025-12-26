@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:untitled/features/location/location_record.dart';
 import 'package:untitled/service/local_db_service.dart';
+import '../tracking_health.dart';
 import 'auth_provider.dart';       // for apiServiceProvider
 import 'settings_provider.dart';  // for gpsIntervalProvider
 
@@ -55,6 +56,22 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
   }) async {
     await stopLocationStream();
 
+    // ✅ make sure permission/service are OK before starting stream
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      debugPrint("❌ Location service OFF");
+      return;
+    }
+
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+      debugPrint("❌ Location permission denied");
+      return;
+    }
+
     final interval = ref.read(gpsIntervalProvider); // fixed 10s
     final battery = Battery();
 
@@ -66,8 +83,7 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         distanceFilter: 0,
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationTitle: 'Location tracking active',
-          notificationText:
-          'We are tracking your location while you are on duty.',
+          notificationText: 'We are tracking your location while you are on duty.',
           enableWakeLock: true,
         ),
       );
@@ -81,27 +97,35 @@ class LocationNotifier extends StateNotifier<LocationRecord?> {
         showBackgroundLocationIndicator: true,
       );
     } else {
-      locationSettings = const LocationSettings(
-        accuracy: LocationAccuracy.high,
+      locationSettings = LocationSettings(
+        accuracy: _currentAccuracy,
         distanceFilter: 0,
       );
     }
 
-    debugPrint(
-        "🚀 GPS tracking started via getPositionStream (interval=$interval s)");
+    debugPrint("🚀 GPS tracking started via getPositionStream (interval=$interval s)");
 
     _positionSub = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen((Position? pos) async {
-      if (pos == null) return;
-
-      await _captureAndStoreLocation(
-        driverId,
-        deviceId,
-        battery,
-        externalPosition: pos,
-      );
-    });
+      locationSettings: locationSettings, // ✅ USE the settings you built
+    ).listen(
+          (pos) async {
+        // ✅ STORE to DB
+        await _captureAndStoreLocation(
+          driverId,
+          deviceId,
+          battery,
+          externalPosition: pos,
+        );
+      },
+      onError: (e) async {
+        debugPrint("❌ Location stream error: $e");
+        // Stop stream cleanly so it doesn't keep throwing
+        await stopLocationStream();
+        // Health banner will show because permissions/service will fail OR DB stops updating
+        ref.invalidate(trackingHealthProvider);
+      },
+      cancelOnError: false,
+    );
   }
 
   double _speedKmhFrom(Position pos) {
